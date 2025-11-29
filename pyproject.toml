@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pydantic-ai-filesystem-sandbox"
+version = "0.1.0"
+description = "Filesystem sandbox toolset for PydanticAI agents with LLM-friendly errors"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Zbigniew Braniecki" },
+]
+keywords = [
+    "pydantic-ai",
+    "llm",
+    "agent",
+    "tools",
+    "sandbox",
+    "filesystem",
+    "security",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Security",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-ai>=0.1",
+]
+
+[project.optional-dependencies]
+approval = [
+    "pydantic-ai-blocking-approval>=0.1.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pydantic-ai-blocking-approval>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
+Repository = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pydantic_ai_filesystem_sandbox"]
+
+[tool.uv.sources]
+pydantic-ai-blocking-approval = { path = "../pydantic-ai-blocking-approval", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
