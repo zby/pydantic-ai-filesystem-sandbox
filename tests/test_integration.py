@@ -131,7 +131,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=deny_callback,
-            require_approval=["write_file", "read_file"],
         )
 
         # Call the toolset method directly with valid args
@@ -177,7 +176,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=approve_callback,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -223,7 +221,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=deny_callback,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -269,7 +266,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=approve_callback,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -313,7 +309,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=should_not_be_called,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -332,8 +327,8 @@ class TestApprovalToolsetIntegration:
         assert not callback_called
         assert (sandbox_root / "test.txt").read_text() == "test"
 
-    def test_tool_not_in_require_approval_list_skips_approval(self, tmp_path):
-        """Test that tools not in require_approval list skip approval entirely."""
+    def test_pre_approved_tool_skips_approval(self, tmp_path):
+        """Test that tools in pre_approved list skip approval entirely."""
         callback_called = False
 
         def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
@@ -357,7 +352,7 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=should_not_be_called,
-            require_approval=["read_file"],  # write_file NOT in list
+            pre_approved=["write_file"],  # write_file in pre_approved
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -373,7 +368,7 @@ class TestApprovalToolsetIntegration:
             )
         )
 
-        # Callback should NOT be called because write_file is not in require_approval
+        # Callback should NOT be called because write_file is pre_approved
         assert not callback_called
         assert (sandbox_root / "test.txt").read_text() == "test"
 
@@ -403,7 +398,6 @@ class TestApprovalToolsetIntegration:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=should_not_be_called,
-            require_approval=["write_file", "read_file", "list_files"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -448,7 +442,6 @@ class TestApprovalControllerIntegration:
             inner=sandbox,
             prompt_fn=controller.approval_callback,
             memory=controller.memory,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -488,7 +481,6 @@ class TestApprovalControllerIntegration:
             inner=sandbox,
             prompt_fn=controller.approval_callback,
             memory=controller.memory,
-            require_approval=["write_file", "read_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -595,8 +587,8 @@ class TestNeedsApprovalProtocol:
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
         assert result is False
 
-    def test_needs_approval_returns_true_when_enabled(self, tmp_path):
-        """Test needs_approval returns True when approval is enabled."""
+    def test_needs_approval_returns_dict_when_enabled(self, tmp_path):
+        """Test needs_approval returns dict with presentation when approval is enabled."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -612,7 +604,11 @@ class TestNeedsApprovalProtocol:
         sandbox = FileSandboxImpl(config)
 
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
-        assert result is True
+        assert isinstance(result, dict)
+        assert "description" in result
+        assert "Write to output" in result["description"]
+        assert "payload" in result
+        assert result["payload"]["sandbox"] == "output"
 
     def test_needs_approval_for_list_files_always_false(self, tmp_path):
         """Test that list_files never requires approval."""
@@ -634,73 +630,55 @@ class TestNeedsApprovalProtocol:
         assert result is False
 
 
-class TestPresentForApproval:
-    """Tests for the PresentableForApproval protocol implementation."""
+class TestNeedsApprovalPresentation:
+    """Tests for presentation returned by needs_approval()."""
 
-    def test_present_for_approval_write(self, tmp_path):
-        """Test present_for_approval returns nice description for writes."""
+    def test_needs_approval_write_presentation(self, tmp_path):
+        """Test needs_approval returns nice description for writes."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
         config = FileSandboxConfig(
             paths={
-                "output": PathConfig(root=str(sandbox_root), mode="rw")
+                "output": PathConfig(root=str(sandbox_root), mode="rw", write_approval=True)
             }
         )
         sandbox = FileSandboxImpl(config)
 
-        result = sandbox.present_for_approval(
+        result = sandbox.needs_approval(
             "write_file", {"path": "output/test.txt", "content": "data"}
         )
 
+        assert isinstance(result, dict)
         assert "description" in result
         assert "Write to output" in result["description"]
         assert "payload" in result
         assert result["payload"]["sandbox"] == "output"
 
-    def test_present_for_approval_read(self, tmp_path):
-        """Test present_for_approval returns nice description for reads."""
+    def test_needs_approval_read_presentation(self, tmp_path):
+        """Test needs_approval returns nice description for reads."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
         config = FileSandboxConfig(
             paths={
-                "data": PathConfig(root=str(sandbox_root), mode="ro")
+                "data": PathConfig(root=str(sandbox_root), mode="ro", read_approval=True)
             }
         )
         sandbox = FileSandboxImpl(config)
 
-        result = sandbox.present_for_approval(
+        result = sandbox.needs_approval(
             "read_file", {"path": "data/test.txt"}
         )
 
+        assert isinstance(result, dict)
         assert "description" in result
         assert "Read from data" in result["description"]
         assert "payload" in result
         assert result["payload"]["sandbox"] == "data"
 
-    def test_present_for_approval_fallback(self, tmp_path):
-        """Test present_for_approval returns fallback for unknown paths."""
-        sandbox_root = tmp_path / "data"
-        sandbox_root.mkdir()
-
-        config = FileSandboxConfig(
-            paths={
-                "data": PathConfig(root=str(sandbox_root), mode="ro")
-            }
-        )
-        sandbox = FileSandboxImpl(config)
-
-        # Unknown path falls back to basic presentation
-        result = sandbox.present_for_approval(
-            "read_file", {"path": "unknown/test.txt"}
-        )
-
-        assert "description" in result
-        assert "read_file" in result["description"]
-
-    def test_approval_uses_present_for_approval(self, tmp_path):
-        """Test that ApprovalToolset uses present_for_approval for nice descriptions."""
+    def test_approval_uses_needs_approval_presentation(self, tmp_path):
+        """Test that ApprovalToolset uses needs_approval dict for nice descriptions."""
         approval_requests: list[ApprovalRequest] = []
 
         def capture_callback(request: ApprovalRequest) -> ApprovalDecision:
@@ -723,7 +701,6 @@ class TestPresentForApproval:
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
             prompt_fn=capture_callback,
-            require_approval=["write_file"],
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -739,7 +716,7 @@ class TestPresentForApproval:
             )
         )
 
-        # Check that the approval request has nice description from present_for_approval
+        # Check that the approval request has nice description from needs_approval dict
         assert len(approval_requests) == 1
         assert "Write to output" in approval_requests[0].description
         assert approval_requests[0].payload["sandbox"] == "output"
@@ -781,7 +758,6 @@ class TestSimpleToolsWithoutNeedsApproval:
         approved_toolset = ApprovalToolset(
             inner=toolset,
             prompt_fn=capture_callback,
-            require_approval=["do_something"],
         )
 
         ctx = MagicMock(spec=RunContext)

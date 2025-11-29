@@ -9,7 +9,7 @@ This module provides a standalone, reusable filesystem sandbox for PydanticAI:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
@@ -332,10 +332,16 @@ class FileSandboxImpl(AbstractToolset[Any]):
     # Approval Interface (ApprovalConfigurable protocol)
     # ---------------------------------------------------------------------------
 
-    def needs_approval(self, tool_name: str, args: dict[str, Any]) -> bool:
+    def needs_approval(
+        self, tool_name: str, args: dict[str, Any]
+    ) -> Union[bool, dict[str, Any]]:
         """Check if the tool call requires approval.
 
-        Implements the ApprovalConfigurable protocol - returns True/False.
+        Implements the ApprovalConfigurable protocol:
+        - False: No approval needed
+        - True: Approval needed with default presentation
+        - dict: Approval needed with custom presentation (description, payload)
+
         Path validation is also performed here, raising PermissionError
         for blocked operations.
 
@@ -344,7 +350,7 @@ class FileSandboxImpl(AbstractToolset[Any]):
             args: Tool arguments
 
         Returns:
-            True if approval is needed, False otherwise
+            False if no approval needed, or dict with custom presentation if needed
 
         Raises:
             PermissionError: If operation is blocked entirely (path not in sandbox, etc.)
@@ -360,7 +366,14 @@ class FileSandboxImpl(AbstractToolset[Any]):
             if config.mode != "rw":
                 raise PermissionError(f"Path is read-only: {path}")
 
-            return config.write_approval
+            if not config.write_approval:
+                return False
+
+            # Approval needed - return custom presentation
+            return {
+                "description": f"Write to {sandbox_name}/{path}",
+                "payload": {"sandbox": sandbox_name, "path": path},
+            }
 
         elif tool_name == "read_file":
             try:
@@ -368,54 +381,17 @@ class FileSandboxImpl(AbstractToolset[Any]):
             except PathNotInSandboxError:
                 raise PermissionError(f"Path not in any sandbox: {path}")
 
-            return config.read_approval
+            if not config.read_approval:
+                return False
 
-        # list_files doesn't require approval
-        return False
-
-    def present_for_approval(
-        self, tool_name: str, args: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Provide custom presentation for approval prompts.
-
-        Implements the PresentableForApproval protocol - returns a dict
-        with description and payload for nicer approval display.
-
-        Args:
-            tool_name: Name of the tool being called
-            args: Tool arguments
-
-        Returns:
-            dict with:
-                - description: str - Human-readable description
-                - payload: dict - Data for session pattern matching
-        """
-        path = args.get("path", "")
-
-        try:
-            sandbox_name, resolved, config = self._find_path_for(path)
-        except PathNotInSandboxError:
-            # Fallback to basic presentation
-            return {
-                "description": f"{tool_name}(path={path!r})",
-                "payload": args,
-            }
-
-        if tool_name == "write_file":
-            return {
-                "description": f"Write to {sandbox_name}/{path}",
-                "payload": {"sandbox": sandbox_name, "path": path},
-            }
-        elif tool_name == "read_file":
+            # Approval needed - return custom presentation
             return {
                 "description": f"Read from {sandbox_name}/{path}",
                 "payload": {"sandbox": sandbox_name, "path": path},
             }
-        else:
-            return {
-                "description": f"{tool_name} in {sandbox_name}",
-                "payload": {"sandbox": sandbox_name},
-            }
+
+        # list_files doesn't require approval
+        return False
 
     # ---------------------------------------------------------------------------
     # File Operations

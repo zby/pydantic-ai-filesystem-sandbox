@@ -21,8 +21,7 @@ FileSandboxImpl (AbstractToolset)
     ├── read_file — read text files with truncation/offset
     ├── write_file — write text files (rw paths only)
     ├── list_files — glob-based file listing
-    ├── needs_approval() — per-call approval decision (bool)
-    └── present_for_approval() — custom presentation for approvals
+    └── needs_approval() — per-call approval decision (False | dict)
 
 PathConfig (per-path settings)
     ├── root — base directory
@@ -63,7 +62,7 @@ LLM-Friendly Errors
 
 1. **Standalone**: Create `FileSandboxImpl` and pass to agent as toolset (no approval)
 2. **With Approval**: Wrap with `ApprovalToolset` from `pydantic-ai-blocking-approval`
-3. **Custom**: Extend `FileSandboxImpl` and override `needs_approval()` / `present_for_approval()`
+3. **Custom**: Extend `FileSandboxImpl` and override `needs_approval()` to return custom dict
 
 ---
 
@@ -80,7 +79,7 @@ LLM-Friendly Errors
 - Path format is `sandbox_name/relative/path` — don't use absolute paths
 - The `_base_path` defaults to `cwd()` — set it explicitly for reproducibility
 - Directories are auto-created on `_setup_paths()` — be aware of side effects
-- `needs_approval()` returns `bool` — ApprovalToolset handles the rest
+- `needs_approval()` returns `False` or `dict` with description/payload — ApprovalToolset handles the rest
 - All errors include guidance for the LLM — don't catch and re-raise without context
 
 ---
