@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from pydantic_ai_filesystem_sandbox import (
+    EditError,
     FileSandboxConfig,
     FileSandboxImpl,
     PathConfig,
@@ -253,3 +254,108 @@ class TestSandboxPathValidation:
 
         with pytest.raises(PathNotInSandboxError, match="outside sandbox"):
             sandbox.read("unknown/file.txt")
+
+
+class TestSandboxEdit:
+    """Tests for FileSandboxImpl.edit() functionality."""
+
+    def test_edit_replaces_text(self, tmp_path):
+        """FileSandboxImpl.edit() replaces old_text with new_text."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("Hello World!", encoding="utf-8")
+
+        config = FileSandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        result = sandbox.edit("output/test.txt", "World", "Python")
+        assert "Edited" in result
+        assert test_file.read_text() == "Hello Python!"
+
+    def test_edit_multiline(self, tmp_path):
+        """FileSandboxImpl.edit() handles multiline replacements."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+        config = FileSandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        result = sandbox.edit("output/test.txt", "line2\nline3", "replaced")
+        assert test_file.read_text() == "line1\nreplaced\n"
+
+    def test_edit_text_not_found(self, tmp_path):
+        """FileSandboxImpl.edit() raises EditError when text not found."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("Hello World!", encoding="utf-8")
+
+        config = FileSandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        with pytest.raises(EditError, match="text not found"):
+            sandbox.edit("output/test.txt", "nonexistent", "replacement")
+
+    def test_edit_multiple_matches(self, tmp_path):
+        """FileSandboxImpl.edit() raises EditError when text appears multiple times."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("foo bar foo baz foo", encoding="utf-8")
+
+        config = FileSandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        with pytest.raises(EditError, match="found 3 times"):
+            sandbox.edit("output/test.txt", "foo", "qux")
+
+    def test_edit_readonly_raises(self, tmp_path):
+        """FileSandboxImpl.edit() raises for read-only paths."""
+        sandbox_root = tmp_path / "input"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("Hello World!", encoding="utf-8")
+
+        config = FileSandboxConfig(
+            paths={
+                "input": PathConfig(root=str(sandbox_root), mode="ro")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        with pytest.raises(PathNotWritableError, match="read-only"):
+            sandbox.edit("input/test.txt", "World", "Python")
+
+    def test_edit_file_not_found(self, tmp_path):
+        """FileSandboxImpl.edit() raises when file doesn't exist."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+
+        config = FileSandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSandboxImpl(config)
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            sandbox.edit("output/nonexistent.txt", "old", "new")

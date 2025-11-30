@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2025-11-30
+
+### Added
+- New `edit_file` tool for search/replace editing (like Claude Code's Edit tool)
+- `EditError` exception for edit operation failures
+- LLM provides `old_text` and `new_text`; CLI can render as colored diff for approval
+
 ## [0.3.0] - 2025-11-30
 
 ### Changed

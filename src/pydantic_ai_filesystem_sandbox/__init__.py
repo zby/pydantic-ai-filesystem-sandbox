@@ -31,6 +31,7 @@ Usage (with approval - requires pydantic-ai-blocking-approval):
 
 from .sandbox import (
     DEFAULT_MAX_READ_CHARS,
+    EditError,
     FileSandboxConfig,
     FileSandboxError,
     FileSandboxImpl,
@@ -42,10 +43,11 @@ from .sandbox import (
     SuffixNotAllowedError,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "DEFAULT_MAX_READ_CHARS",
+    "EditError",
     "FileSandboxConfig",
     "FileSandboxError",
     "FileSandboxImpl",

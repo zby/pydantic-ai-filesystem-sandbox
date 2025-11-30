@@ -127,6 +127,23 @@ class FileTooLargeError(FileSandboxError):
         super().__init__(self.message)
 
 
+class EditError(FileSandboxError):
+    """Raised when edit operation fails."""
+
+    def __init__(self, path: str, reason: str, old_text: str):
+        self.path = path
+        self.reason = reason
+        self.old_text = old_text
+        # Show a preview of what was being searched for
+        preview = old_text[:100] + "..." if len(old_text) > 100 else old_text
+        preview = preview.replace("\n", "\\n")
+        self.message = (
+            f"Cannot edit '{path}': {reason}.\n"
+            f"Searched for: {preview!r}"
+        )
+        super().__init__(self.message)
+
+
 # ---------------------------------------------------------------------------
 # Read Result
 # ---------------------------------------------------------------------------
@@ -384,6 +401,21 @@ class FileSandboxImpl(AbstractToolset[Any]):
             # Approval needed - return custom description
             return {"description": f"Read from {sandbox_name}/{path}"}
 
+        elif tool_name == "edit_file":
+            try:
+                sandbox_name, resolved, config = self._find_path_for(path)
+            except PathNotInSandboxError:
+                raise PermissionError(f"Path not in any sandbox: {path}")
+
+            if config.mode != "rw":
+                raise PermissionError(f"Path is read-only: {path}")
+
+            if not config.write_approval:
+                return False
+
+            # Approval needed - return custom description
+            return {"description": f"Edit {sandbox_name}/{path}"}
+
         # list_files doesn't require approval
         return False
 
@@ -472,6 +504,64 @@ class FileSandboxImpl(AbstractToolset[Any]):
 
         resolved.write_text(content, encoding="utf-8")
         return f"Written {len(content)} characters to {name}/{resolved.relative_to(self._paths[name][0])}"
+
+    def edit(self, path: str, old_text: str, new_text: str) -> str:
+        """Edit a file by replacing old_text with new_text.
+
+        This is a search/replace operation that requires an exact match.
+        The old_text must appear exactly once in the file.
+
+        Args:
+            path: Path to file (relative to sandbox)
+            old_text: Exact text to find and replace
+            new_text: Text to replace it with
+
+        Returns:
+            Confirmation message
+
+        Raises:
+            PathNotInSandboxError: If path outside sandbox
+            PathNotWritableError: If path is read-only
+            SuffixNotAllowedError: If suffix not allowed
+            EditError: If old_text not found or found multiple times
+            FileNotFoundError: If file doesn't exist
+        """
+        name, resolved, config = self._find_path_for(path)
+
+        if config.mode != "rw":
+            raise PathNotWritableError(path, self.writable_roots)
+
+        self._check_suffix(resolved, config)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        # Read current content
+        content = resolved.read_text(encoding="utf-8")
+
+        # Count occurrences
+        count = content.count(old_text)
+
+        if count == 0:
+            raise EditError(path, "text not found in file", old_text)
+        if count > 1:
+            raise EditError(
+                path, f"text found {count} times (must be unique)", old_text
+            )
+
+        # Perform the replacement
+        new_content = content.replace(old_text, new_text, 1)
+
+        # Check content size against limit
+        if config.max_file_bytes is not None:
+            content_bytes = len(new_content.encode("utf-8"))
+            if content_bytes > config.max_file_bytes:
+                raise FileTooLargeError(path, content_bytes, config.max_file_bytes)
+
+        resolved.write_text(new_content, encoding="utf-8")
+
+        rel_path = resolved.relative_to(self._paths[name][0])
+        return f"Edited {name}/{rel_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
 
     def list_files(self, path: str = ".", pattern: str = "**/*") -> list[str]:
         """List files matching pattern within sandbox.
@@ -584,6 +674,25 @@ class FileSandboxImpl(AbstractToolset[Any]):
             },
         }
 
+        edit_file_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path format: 'sandbox_name/relative/path'",
+                },
+                "old_text": {
+                    "type": "string",
+                    "description": "Exact text to find (must match exactly and be unique)",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Text to replace old_text with",
+                },
+            },
+            "required": ["path", "old_text", "new_text"],
+        }
+
         # Create ToolsetTool instances
         tools["read_file"] = ToolsetTool(
             toolset=self,
@@ -630,6 +739,21 @@ class FileSandboxImpl(AbstractToolset[Any]):
             args_validator=TypeAdapter(dict[str, Any]).validator,
         )
 
+        tools["edit_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="edit_file",
+                description=(
+                    "Edit a file by replacing exact text. "
+                    "The old_text must match exactly and appear only once. "
+                    "Path format: 'sandbox_name/relative/path'."
+                ),
+                parameters_json_schema=edit_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
         return tools
 
     async def call_tool(
@@ -659,6 +783,12 @@ class FileSandboxImpl(AbstractToolset[Any]):
             path = tool_args.get("path", ".")
             pattern = tool_args.get("pattern", "**/*")
             return self.list_files(path, pattern)
+
+        elif name == "edit_file":
+            path = tool_args["path"]
+            old_text = tool_args["old_text"]
+            new_text = tool_args["new_text"]
+            return self.edit(path, old_text, new_text)
 
         else:
             raise ValueError(f"Unknown tool: {name}")
