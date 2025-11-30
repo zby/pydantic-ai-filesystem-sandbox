@@ -2086,7 +2086,6 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-filesystem-sandbox"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -2097,14 +2096,11 @@ dependencies = [
 approval = [
     { name = "pydantic-ai-blocking-approval" },
 ]
-dev = [
-    { name = "pydantic-ai-blocking-approval" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
 
 [package.dev-dependencies]
 dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "twine" },
 ]
 
@@ -2113,13 +2109,14 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai", specifier = ">=0.1" },
     { name = "pydantic-ai-blocking-approval", marker = "extra == 'approval'", specifier = ">=0.1.0" },
-    { name = "pydantic-ai-blocking-approval", marker = "extra == 'dev'", specifier = ">=0.1.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "twine", specifier = ">=6.2.0" }]
+dev = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21" },
+    { name = "twine", specifier = ">=6.2.0" },
+]
 
 [[package]]
 name = "pydantic-ai-slim"

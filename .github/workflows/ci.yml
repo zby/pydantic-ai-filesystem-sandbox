@@ -27,7 +27,7 @@ jobs:
           allow-prereleases: true
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --dev --all-extras
 
       - name: Run tests
         run: uv run pytest -v
