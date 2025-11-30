@@ -42,7 +42,7 @@ from .sandbox import (
     SuffixNotAllowedError,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "DEFAULT_MAX_READ_CHARS",

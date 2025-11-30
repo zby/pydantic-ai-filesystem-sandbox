@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pydantic-ai-filesystem-sandbox"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Filesystem sandbox toolset for PydanticAI agents with LLM-friendly errors"
 readme = "README.md"
 license = "MIT"
@@ -52,11 +52,11 @@ dev = [
 Homepage = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
 Repository = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
 
+[tool.hatch.version]
+path = "src/pydantic_ai_filesystem_sandbox/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pydantic_ai_filesystem_sandbox"]
-
-[tool.uv.sources]
-pydantic-ai-blocking-approval = { path = "../pydantic-ai-blocking-approval", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
