@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Zbigniew Braniecki" },
+    { name = "Zbigniew Łukasiak" },
 ]
 keywords = [
     "pydantic-ai",
@@ -29,6 +29,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Security",
 ]
@@ -59,3 +60,8 @@ pydantic-ai-blocking-approval = { path = "../pydantic-ai-blocking-approval", edi
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "twine>=6.2.0",
+]
