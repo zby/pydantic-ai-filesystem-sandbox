@@ -157,9 +157,8 @@ sandbox = FileSandboxImpl(config)
 controller = ApprovalController(mode="interactive", approval_callback=my_prompt_fn)
 approved_sandbox = ApprovalToolset(
     inner=sandbox,
-    prompt_fn=controller.approval_callback,
+    approval_callback=controller.approval_callback,
     memory=controller.memory,
-    require_approval=["write_file", "read_file"],
 )
 
 agent = Agent(..., toolsets=[approved_sandbox])

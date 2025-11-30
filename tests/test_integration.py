@@ -130,7 +130,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=deny_callback,
+            approval_callback=deny_callback,
         )
 
         # Call the toolset method directly with valid args
@@ -175,7 +175,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=approve_callback,
+            approval_callback=approve_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -220,7 +220,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=deny_callback,
+            approval_callback=deny_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -265,7 +265,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=approve_callback,
+            approval_callback=approve_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -308,7 +308,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=should_not_be_called,
+            approval_callback=should_not_be_called,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -351,7 +351,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=should_not_be_called,
+            approval_callback=should_not_be_called,
             pre_approved=["write_file"],  # write_file in pre_approved
         )
 
@@ -397,7 +397,7 @@ class TestApprovalToolsetIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=should_not_be_called,
+            approval_callback=should_not_be_called,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -440,7 +440,7 @@ class TestApprovalControllerIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=controller.approval_callback,
+            approval_callback=controller.approval_callback,
             memory=controller.memory,
         )
 
@@ -479,7 +479,7 @@ class TestApprovalControllerIntegration:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=controller.approval_callback,
+            approval_callback=controller.approval_callback,
             memory=controller.memory,
         )
 
@@ -700,7 +700,7 @@ class TestNeedsApprovalPresentation:
         sandbox = FileSandboxImpl(config)
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            prompt_fn=capture_callback,
+            approval_callback=capture_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -757,7 +757,7 @@ class TestSimpleToolsWithoutNeedsApproval:
 
         approved_toolset = ApprovalToolset(
             inner=toolset,
-            prompt_fn=capture_callback,
+            approval_callback=capture_callback,
         )
 
         ctx = MagicMock(spec=RunContext)

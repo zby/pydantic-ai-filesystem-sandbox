@@ -42,7 +42,7 @@ dependencies = [
 # [dependency-groups] is the newer PEP 735 standard used by uv
 [project.optional-dependencies]
 approval = [
-    "pydantic-ai-blocking-approval>=0.1.0",
+    "pydantic-ai-blocking-approval>=0.2.0",
 ]
 
 [dependency-groups]

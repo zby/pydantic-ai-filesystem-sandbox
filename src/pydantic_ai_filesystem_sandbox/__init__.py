@@ -25,7 +25,7 @@ Usage (with approval - requires pydantic-ai-blocking-approval):
         "data": PathConfig(root="./data", mode="rw", write_approval=True),
     })
     sandbox = FileSandboxImpl(config)
-    approved_sandbox = ApprovalToolset(sandbox, prompt_fn=cli_prompt)
+    approved_sandbox = ApprovalToolset(sandbox, approval_callback=cli_prompt)
     agent = Agent(..., toolsets=[approved_sandbox])
 """
 
