@@ -607,8 +607,6 @@ class TestNeedsApprovalProtocol:
         assert isinstance(result, dict)
         assert "description" in result
         assert "Write to output" in result["description"]
-        assert "payload" in result
-        assert result["payload"]["sandbox"] == "output"
 
     def test_needs_approval_for_list_files_always_false(self, tmp_path):
         """Test that list_files never requires approval."""
@@ -652,8 +650,6 @@ class TestNeedsApprovalPresentation:
         assert isinstance(result, dict)
         assert "description" in result
         assert "Write to output" in result["description"]
-        assert "payload" in result
-        assert result["payload"]["sandbox"] == "output"
 
     def test_needs_approval_read_presentation(self, tmp_path):
         """Test needs_approval returns nice description for reads."""
@@ -674,8 +670,6 @@ class TestNeedsApprovalPresentation:
         assert isinstance(result, dict)
         assert "description" in result
         assert "Read from data" in result["description"]
-        assert "payload" in result
-        assert result["payload"]["sandbox"] == "data"
 
     def test_approval_uses_needs_approval_presentation(self, tmp_path):
         """Test that ApprovalToolset uses needs_approval dict for nice descriptions."""
@@ -719,7 +713,7 @@ class TestNeedsApprovalPresentation:
         # Check that the approval request has nice description from needs_approval dict
         assert len(approval_requests) == 1
         assert "Write to output" in approval_requests[0].description
-        assert approval_requests[0].payload["sandbox"] == "output"
+        assert approval_requests[0].tool_args["path"] == "output/test.txt"
 
 
 class TestSimpleToolsWithoutNeedsApproval:

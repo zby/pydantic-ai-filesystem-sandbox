@@ -340,7 +340,7 @@ class FileSandboxImpl(AbstractToolset[Any]):
         Implements the ApprovalConfigurable protocol:
         - False: No approval needed
         - True: Approval needed with default presentation
-        - dict: Approval needed with custom presentation (description, payload)
+        - dict: Approval needed with custom description
 
         Path validation is also performed here, raising PermissionError
         for blocked operations.
@@ -350,7 +350,7 @@ class FileSandboxImpl(AbstractToolset[Any]):
             args: Tool arguments
 
         Returns:
-            False if no approval needed, or dict with custom presentation if needed
+            False if no approval needed, or dict with description if needed
 
         Raises:
             PermissionError: If operation is blocked entirely (path not in sandbox, etc.)
@@ -369,11 +369,8 @@ class FileSandboxImpl(AbstractToolset[Any]):
             if not config.write_approval:
                 return False
 
-            # Approval needed - return custom presentation
-            return {
-                "description": f"Write to {sandbox_name}/{path}",
-                "payload": {"sandbox": sandbox_name, "path": path},
-            }
+            # Approval needed - return custom description
+            return {"description": f"Write to {sandbox_name}/{path}"}
 
         elif tool_name == "read_file":
             try:
@@ -384,11 +381,8 @@ class FileSandboxImpl(AbstractToolset[Any]):
             if not config.read_approval:
                 return False
 
-            # Approval needed - return custom presentation
-            return {
-                "description": f"Read from {sandbox_name}/{path}",
-                "payload": {"sandbox": sandbox_name, "path": path},
-            }
+            # Approval needed - return custom description
+            return {"description": f"Read from {sandbox_name}/{path}"}
 
         # list_files doesn't require approval
         return False

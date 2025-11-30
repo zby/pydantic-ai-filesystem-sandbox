@@ -2,12 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-11-30
+
+### Changed
+- **Breaking**: Requires `pydantic-ai-blocking-approval>=0.3.0` for approval functionality
+- Simplified `needs_approval()` return - now only returns `description` key (no `payload`)
+- ApprovalRequest now uses `tool_args` instead of `payload` for session cache matching
+
 ## [0.2.0] - 2025-11-30
 
 ### Changed
 - **Breaking**: Requires `pydantic-ai-blocking-approval>=0.2.0` for approval functionality
 - Updated examples and tests to use `approval_callback` parameter (renamed from `prompt_fn`)
-- Removed `require_approval` parameter from `ApprovalToolset` usage examples
 
 ### Added
 - GitHub Actions CI workflow (tests on Python 3.12, 3.13, 3.14)
