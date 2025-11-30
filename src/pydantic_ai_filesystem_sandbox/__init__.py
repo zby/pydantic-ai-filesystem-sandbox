@@ -4,13 +4,13 @@ This package provides a standalone, reusable filesystem sandbox for PydanticAI:
 - FileSandboxConfig and PathConfig for configuration
 - FileSandboxError classes with LLM-friendly messages
 - FileSandboxImpl implementation as a PydanticAI AbstractToolset
-- Implements ApprovalConfigurable protocol for optional approval support
+- FileSandboxApprovalToolset for optional approval support
 
 Usage (standalone - no approval):
     from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig, PathConfig
 
     config = FileSandboxConfig(paths={
-        "data": PathConfig(root="./data", mode="rw", write_approval=False),
+        "data": PathConfig(root="./data", mode="rw"),
     })
     sandbox = FileSandboxImpl(config)
     agent = Agent(..., toolsets=[sandbox])
@@ -19,13 +19,16 @@ Usage (with approval - requires pydantic-ai-blocking-approval):
     pip install pydantic-ai-filesystem-sandbox[approval]
 
     from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig, PathConfig
-    from pydantic_ai_blocking_approval import ApprovalToolset
+    from pydantic_ai_filesystem_sandbox.approval import FileSandboxApprovalToolset
 
     config = FileSandboxConfig(paths={
         "data": PathConfig(root="./data", mode="rw", write_approval=True),
     })
     sandbox = FileSandboxImpl(config)
-    approved_sandbox = ApprovalToolset(sandbox, approval_callback=cli_prompt)
+    approved_sandbox = FileSandboxApprovalToolset(
+        inner=sandbox,
+        approval_callback=my_prompt_fn,
+    )
     agent = Agent(..., toolsets=[approved_sandbox])
 """
 
@@ -43,7 +46,7 @@ from .sandbox import (
     SuffixNotAllowedError,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "DEFAULT_MAX_READ_CHARS",

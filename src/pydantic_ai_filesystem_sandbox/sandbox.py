@@ -4,7 +4,8 @@ This module provides a standalone, reusable filesystem sandbox for PydanticAI:
 - FileSandboxConfig and PathConfig for configuration
 - FileSandboxError classes with LLM-friendly messages
 - FileSandboxImpl implementation as a PydanticAI AbstractToolset
-- Built-in approval checking support (optional, via ApprovalConfigurable protocol)
+
+For approval support, use FileSandboxApprovalToolset from the approval module.
 """
 from __future__ import annotations
 
@@ -346,21 +347,20 @@ class FileSandboxImpl(AbstractToolset[Any]):
                 raise FileTooLargeError(str(path), size, config.max_file_bytes)
 
     # ---------------------------------------------------------------------------
-    # Approval Interface (ApprovalConfigurable protocol)
+    # Approval Helper (used by FileSandboxApprovalToolset)
     # ---------------------------------------------------------------------------
 
     def needs_approval(
         self, tool_name: str, args: dict[str, Any]
     ) -> Union[bool, dict[str, Any]]:
-        """Check if the tool call requires approval.
+        """Check if the tool call requires approval based on PathConfig.
 
-        Implements the ApprovalConfigurable protocol:
+        This is a helper method used by FileSandboxApprovalToolset.
+        Returns:
         - False: No approval needed
-        - True: Approval needed with default presentation
         - dict: Approval needed with custom description
 
-        Path validation is also performed here, raising PermissionError
-        for blocked operations.
+        Also validates paths and raises PermissionError for blocked operations.
 
         Args:
             tool_name: Name of the tool being called

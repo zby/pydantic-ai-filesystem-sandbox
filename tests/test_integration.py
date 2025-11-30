@@ -20,6 +20,7 @@ from pydantic_ai_filesystem_sandbox import (
     FileSandboxImpl,
     PathConfig,
 )
+from pydantic_ai_filesystem_sandbox.approval import FileSandboxApprovalToolset
 
 
 class TestFileSandboxStandalone:
@@ -101,7 +102,7 @@ class TestFileSandboxStandalone:
 
 
 class TestApprovalToolsetIntegration:
-    """Integration tests for FileSandboxImpl wrapped with ApprovalToolset.
+    """Integration tests for FileSandboxImpl wrapped with FileSandboxApprovalToolset.
 
     These tests call the toolset methods directly to test the approval flow,
     since TestModel generates placeholder arguments that may not match sandbox paths.
@@ -128,7 +129,7 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=deny_callback,
         )
@@ -136,7 +137,6 @@ class TestApprovalToolsetIntegration:
         # Call the toolset method directly with valid args
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         with pytest.raises(PermissionError) as exc_info:
             asyncio.run(
@@ -173,14 +173,13 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=approve_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -218,14 +217,13 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=deny_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         with pytest.raises(PermissionError) as exc_info:
             asyncio.run(
@@ -263,14 +261,13 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=approve_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -306,14 +303,13 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=should_not_be_called,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -349,15 +345,14 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=should_not_be_called,
-            pre_approved=["write_file"],  # write_file in pre_approved
+            config={"write_file": {"pre_approved": True}},  # write_file pre-approved
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -395,14 +390,13 @@ class TestApprovalToolsetIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=should_not_be_called,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -438,7 +432,7 @@ class TestApprovalControllerIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -446,7 +440,6 @@ class TestApprovalControllerIntegration:
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_sandbox.call_tool(
@@ -477,7 +470,7 @@ class TestApprovalControllerIntegration:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -485,7 +478,6 @@ class TestApprovalControllerIntegration:
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         with pytest.raises(PermissionError) as exc_info:
             asyncio.run(
@@ -692,14 +684,13 @@ class TestNeedsApprovalPresentation:
             }
         )
         sandbox = FileSandboxImpl(config)
-        approved_sandbox = ApprovalToolset(
+        approved_sandbox = FileSandboxApprovalToolset(
             inner=sandbox,
             approval_callback=capture_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         asyncio.run(
             approved_sandbox.call_tool(
@@ -756,7 +747,6 @@ class TestSimpleToolsWithoutNeedsApproval:
 
         ctx = MagicMock(spec=RunContext)
         tool = MagicMock()
-        tool.function._requires_approval = False
 
         result = asyncio.run(
             approved_toolset.call_tool(
