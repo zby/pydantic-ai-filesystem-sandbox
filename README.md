@@ -10,8 +10,35 @@ When building LLM agents that interact with the filesystem, you need:
 2. **Read/Write Control** - Fine-grained permissions per path
 3. **LLM-Friendly Errors** - Error messages that help the LLM correct its behavior
 4. **Approval Integration** - Works with human-in-the-loop approval flows
+5. **OS Sandbox Support** - Export config for bubblewrap/Seatbelt enforcement
 
-This package provides a `FileSandboxImpl` toolset that implements all of these as a PydanticAI `AbstractToolset`.
+## Architecture
+
+This package separates concerns into two layers:
+
+- **Sandbox** - Security boundary for permission checking and path resolution
+- **FileSystemToolset** - File I/O tools that use Sandbox
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Application Layer                       │
+│                                                          │
+│   Sandbox (Policy)              ApprovalToolset         │
+│   ├── path configs              ├── approval callbacks  │
+│   ├── can_read/can_write        └── session memory      │
+│   └── needs_approval()                                  │
+│                                                          │
+│   FileSystemToolset                                      │
+│   └── uses Sandbox                                       │
+└──────────────────────────────────────────────────────────┘
+                         │
+                         │ get_os_sandbox_config()
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│                    OS Layer (Optional)                   │
+│   bubblewrap / Seatbelt for kernel-enforced isolation   │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Installation
 
@@ -24,22 +51,39 @@ pip install pydantic-ai-filesystem-sandbox
 ```python
 from pydantic_ai import Agent
 from pydantic_ai_filesystem_sandbox import (
-    FileSandboxImpl,
-    FileSandboxConfig,
+    FileSystemToolset,
+    Sandbox,
+    SandboxConfig,
     PathConfig,
 )
 
 # Configure sandbox paths
-config = FileSandboxConfig(paths={
+config = SandboxConfig(paths={
     "input": PathConfig(root="./data/input", mode="ro"),   # Read-only
     "output": PathConfig(root="./data/output", mode="rw"), # Read-write
 })
 
-# Create the sandbox toolset
-sandbox = FileSandboxImpl(config)
+# Create the sandbox (security boundary)
+sandbox = Sandbox(config)
+
+# Create the toolset (file I/O tools)
+toolset = FileSystemToolset(sandbox)
 
 # Use with PydanticAI agent
-agent = Agent("openai:gpt-4", toolsets=[sandbox])
+agent = Agent("openai:gpt-4", toolsets=[toolset])
+```
+
+### Simple Usage
+
+For simple cases, use the factory method:
+
+```python
+from pydantic_ai_filesystem_sandbox import FileSystemToolset
+
+# Single directory with read-write access
+toolset = FileSystemToolset.create_default("./data", mode="rw")
+
+agent = Agent("openai:gpt-4", toolsets=[toolset])
 ```
 
 ## Configuration
@@ -55,10 +99,17 @@ agent = Agent("openai:gpt-4", toolsets=[sandbox])
 | `write_approval` | bool | True | Require approval for writes |
 | `read_approval` | bool | False | Require approval for reads |
 
+### SandboxConfig Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `paths` | dict[str, PathConfig] | {} | Named paths with configurations |
+| `network_enabled` | bool | True | Network access (for OS sandbox) |
+
 ### Example Configuration
 
 ```python
-config = FileSandboxConfig(paths={
+config = SandboxConfig(paths={
     # Read-only input - any file type
     "input": PathConfig(
         root="./data/input",
@@ -82,7 +133,7 @@ config = FileSandboxConfig(paths={
 
 ## Available Tools
 
-The sandbox provides three tools to the agent:
+The toolset provides four tools to the agent:
 
 ### read_file
 
@@ -105,6 +156,18 @@ Path format: 'sandbox_name/relative/path'
 Parameters:
   - path: str (required)
   - content: str (required)
+```
+
+### edit_file
+
+Edit a file by replacing exact text (requires `mode="rw"`).
+
+```
+Path format: 'sandbox_name/relative/path'
+Parameters:
+  - path: str (required)
+  - old_text: str (required) - must match exactly and be unique
+  - new_text: str (required)
 ```
 
 ### list_files
@@ -137,6 +200,10 @@ Allowed suffixes: .md, .txt"
 # FileTooLargeError
 "Cannot read 'output/huge.txt': file too large (5,000,000 bytes).
 Maximum allowed: 1,000,000 bytes"
+
+# EditError
+"Cannot edit 'output/file.txt': text not found in file.
+Searched for: 'old text...'"
 ```
 
 ## Approval Integration
@@ -144,27 +211,77 @@ Maximum allowed: 1,000,000 bytes"
 Works with [pydantic-ai-blocking-approval](https://github.com/zby/pydantic-ai-blocking-approval) for human-in-the-loop:
 
 ```python
-from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig, PathConfig
+from pydantic_ai_filesystem_sandbox import FileSystemToolset, Sandbox, SandboxConfig, PathConfig
 from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
 
-# Create sandbox
-config = FileSandboxConfig(paths={
+# Create sandbox and toolset
+config = SandboxConfig(paths={
     "output": PathConfig(root="./output", mode="rw", write_approval=True),
 })
-sandbox = FileSandboxImpl(config)
+sandbox = Sandbox(config)
+toolset = FileSystemToolset(sandbox)
 
 # Wrap with approval
-controller = ApprovalController(mode="interactive", approval_callback=my_prompt_fn)
-approved_sandbox = ApprovalToolset(
-    inner=sandbox,
+controller = ApprovalController(mode="interactive")
+approved_toolset = ApprovalToolset(
+    inner=toolset,
     approval_callback=controller.approval_callback,
     memory=controller.memory,
 )
 
-agent = Agent(..., toolsets=[approved_sandbox])
+agent = Agent(..., toolsets=[approved_toolset])
 ```
 
-The sandbox implements `needs_approval()` and `present_for_approval()` for fine-grained approval control.
+`FileSystemToolset` implements `needs_approval()` which returns rich descriptions for the approval UI.
+
+## OS Sandbox Integration
+
+Export sandbox config for OS-level enforcement with bubblewrap or Seatbelt:
+
+```python
+from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, PathConfig
+
+config = SandboxConfig(
+    paths={
+        "input": PathConfig(root="./input", mode="ro"),
+        "output": PathConfig(root="./output", mode="rw"),
+    },
+    network_enabled=False,
+)
+sandbox = Sandbox(config)
+
+# Export for OS sandbox setup
+os_config = sandbox.get_os_sandbox_config()
+# os_config.mounts = [("input", Path("./input"), "ro"), ("output", Path("./output"), "rw")]
+# os_config.network_enabled = False
+
+# Generate bubblewrap args
+for name, path, mode in os_config.mounts:
+    if mode == "ro":
+        print(f"--ro-bind {path} /sandbox/{name}")
+    else:
+        print(f"--bind {path} /sandbox/{name}")
+```
+
+## Using the Sandbox Directly
+
+The `Sandbox` class can be used independently for permission checking:
+
+```python
+sandbox = Sandbox(config)
+
+# Check permissions
+if sandbox.can_write("output/file.txt"):
+    resolved = sandbox.resolve("output/file.txt")
+    # ... perform operation
+
+# Query boundaries
+print(sandbox.readable_roots)  # ["input", "output"]
+print(sandbox.writable_roots)  # ["output"]
+
+# Check approval requirements
+sandbox.needs_write_approval("output/file.txt")  # True/False
+```
 
 ## ReadResult
 
@@ -183,30 +300,33 @@ This allows agents to handle large files by reading in chunks:
 
 ```python
 # First read
-result = sandbox.read("input/large.txt", max_chars=10000)
+result = toolset.read("input/large.txt", max_chars=10000)
 if result.truncated:
     # Continue reading
-    result2 = sandbox.read("input/large.txt", max_chars=10000, offset=10000)
+    result2 = toolset.read("input/large.txt", max_chars=10000, offset=10000)
 ```
 
 ## API Reference
 
 ### Configuration
 
-- `FileSandboxConfig` - Top-level configuration with named paths
+- `SandboxConfig` - Top-level configuration with named paths and network settings
 - `PathConfig` - Configuration for a single sandbox path
+- `OSSandboxConfig` - Export format for OS-level sandbox setup
 
-### Toolset
+### Classes
 
-- `FileSandboxImpl` - PydanticAI AbstractToolset implementation
+- `Sandbox` - Security boundary for permission checking and path resolution
+- `FileSystemToolset` - PydanticAI AbstractToolset with file I/O tools
 
 ### Errors
 
-- `FileSandboxError` - Base class for all sandbox errors
+- `SandboxError` - Base class for all sandbox errors
 - `PathNotInSandboxError` - Path outside sandbox boundaries
 - `PathNotWritableError` - Write to read-only path
 - `SuffixNotAllowedError` - File extension not allowed
 - `FileTooLargeError` - File exceeds size limit
+- `EditError` - Edit operation failed (text not found or not unique)
 
 ### Types
 
