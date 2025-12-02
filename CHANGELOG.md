@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2025-12-02
+
+### Added
+- New `Sandbox` class: pure security boundary for permission checking and path resolution
+- New `FileSystemToolset` class: file I/O tools that use Sandbox
+- `OSSandboxConfig` dataclass for OS-level sandbox configuration
+- `Sandbox.get_os_sandbox_config()` method to export config for bubblewrap/Seatbelt
+- `SandboxConfig.network_enabled` field for OS sandbox network isolation
+- `FileSystemToolset.create_default()` factory for simple setups
+
+### Changed
+- **Breaking**: Architecture refactored to separate concerns:
+  - `Sandbox` handles policy (permissions, boundaries, approval requirements)
+  - `FileSystemToolset` handles file I/O and implements `needs_approval()`
+- **Breaking**: Requires `pydantic-ai-blocking-approval>=0.5.0`
+- **Breaking**: Removed `FileSandboxApprovalToolset` - use `ApprovalToolset` directly
+- **Breaking**: Removed `FileSandboxImpl`, `FileSandboxConfig`, `FileSandboxError` aliases
+
+### Migration
+```python
+# Old (0.5.0)
+from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig
+from pydantic_ai_filesystem_sandbox.approval import FileSandboxApprovalToolset
+
+sandbox = FileSandboxImpl(config)
+approved = FileSandboxApprovalToolset(inner=sandbox, approval_callback=callback)
+
+# New (0.6.0)
+from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, FileSystemToolset
+from pydantic_ai_blocking_approval import ApprovalToolset
+
+sandbox = Sandbox(config)
+toolset = FileSystemToolset(sandbox)
+approved = ApprovalToolset(inner=toolset, approval_callback=callback)
+```
+
 ## [0.5.0] - 2025-11-30
 
 ### Added

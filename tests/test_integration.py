@@ -6,7 +6,6 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import RunContext
-from pydantic_ai.toolsets import AbstractToolset
 
 from pydantic_ai_blocking_approval import (
     ApprovalController,
@@ -16,22 +15,22 @@ from pydantic_ai_blocking_approval import (
 )
 
 from pydantic_ai_filesystem_sandbox import (
-    FileSandboxConfig,
-    FileSandboxImpl,
+    FileSystemToolset,
     PathConfig,
+    Sandbox,
+    SandboxConfig,
 )
-from pydantic_ai_filesystem_sandbox.approval import FileSandboxApprovalToolset
 
 
 class TestFileSandboxStandalone:
-    """Integration tests for FileSandboxImpl without approval wrapping."""
+    """Integration tests for FileSystemToolset without approval wrapping."""
 
     def test_sandbox_toolset_registers_with_agent(self, tmp_path):
-        """Test that FileSandboxImpl can be registered as a toolset with Agent."""
+        """Test that FileSystemToolset can be registered as a toolset with Agent."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "data": PathConfig(
                     root=str(sandbox_root),
@@ -39,7 +38,7 @@ class TestFileSandboxStandalone:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         # Agent should accept the toolset without error
         agent = Agent(
@@ -50,16 +49,16 @@ class TestFileSandboxStandalone:
         assert agent is not None
 
     def test_sandbox_provides_tools(self, tmp_path):
-        """Test that FileSandboxImpl provides expected tools."""
+        """Test that FileSystemToolset provides expected tools."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "data": PathConfig(root=str(sandbox_root), mode="rw")
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         # Get tools from the toolset
         ctx = MagicMock(spec=RunContext)
@@ -75,7 +74,7 @@ class TestFileSandboxStandalone:
         sandbox_root.mkdir()
         (sandbox_root / "a.txt").write_text("a")
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "files": PathConfig(
                     root=str(sandbox_root),
@@ -83,7 +82,7 @@ class TestFileSandboxStandalone:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         agent = Agent(
             model=TestModel(),
@@ -102,7 +101,7 @@ class TestFileSandboxStandalone:
 
 
 class TestApprovalToolsetIntegration:
-    """Integration tests for FileSandboxImpl wrapped with FileSandboxApprovalToolset.
+    """Integration tests for FileSystemToolset wrapped with ApprovalToolset.
 
     These tests call the toolset methods directly to test the approval flow,
     since TestModel generates placeholder arguments that may not match sandbox paths.
@@ -119,7 +118,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -128,8 +127,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=deny_callback,
         )
@@ -163,7 +162,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -172,8 +171,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=approve_callback,
         )
@@ -207,7 +206,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
         (sandbox_root / "secret.txt").write_text("secret data")
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "sensitive": PathConfig(
                     root=str(sandbox_root),
@@ -216,8 +215,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=deny_callback,
         )
@@ -251,7 +250,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
         (sandbox_root / "secret.txt").write_text("secret data")
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "sensitive": PathConfig(
                     root=str(sandbox_root),
@@ -260,8 +259,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=approve_callback,
         )
@@ -293,7 +292,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -302,8 +301,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=should_not_be_called,
         )
@@ -323,32 +322,36 @@ class TestApprovalToolsetIntegration:
         assert not callback_called
         assert (sandbox_root / "test.txt").read_text() == "test"
 
-    def test_pre_approved_tool_skips_approval(self, tmp_path):
-        """Test that tools in pre_approved list skip approval entirely."""
-        callback_called = False
+    def test_approval_toolset_directly_with_filesystem_toolset(self, tmp_path):
+        """Test using ApprovalToolset directly with FileSystemToolset.
 
-        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
-            nonlocal callback_called
-            callback_called = True
+        This is the recommended approach: configure approval via PathConfig,
+        then wrap with ApprovalToolset (not the deprecated ApprovalToolset).
+        """
+        approval_requests: list[ApprovalRequest] = []
+
+        def capture_callback(request: ApprovalRequest) -> ApprovalDecision:
+            approval_requests.append(request)
             return ApprovalDecision(approved=True)
 
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
                     mode="rw",
-                    write_approval=True,  # Would require approval
+                    write_approval=True,
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        # Use ApprovalToolset directly (recommended approach)
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            approval_callback=should_not_be_called,
-            config={"write_file": {"pre_approved": True}},  # write_file pre-approved
+            approval_callback=capture_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -363,8 +366,9 @@ class TestApprovalToolsetIntegration:
             )
         )
 
-        # Callback should NOT be called because write_file is pre_approved
-        assert not callback_called
+        # ApprovalToolset delegates to inner.needs_approval()
+        assert len(approval_requests) == 1
+        assert approval_requests[0].tool_name == "write_file"
         assert (sandbox_root / "test.txt").read_text() == "test"
 
     def test_list_files_never_needs_approval(self, tmp_path):
@@ -380,7 +384,7 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
         (sandbox_root / "file.txt").write_text("content")
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "data": PathConfig(
                     root=str(sandbox_root),
@@ -389,8 +393,8 @@ class TestApprovalToolsetIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=should_not_be_called,
         )
@@ -422,7 +426,7 @@ class TestApprovalControllerIntegration:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -431,8 +435,8 @@ class TestApprovalControllerIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -460,7 +464,7 @@ class TestApprovalControllerIntegration:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -469,8 +473,8 @@ class TestApprovalControllerIntegration:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=controller.approval_callback,
             memory=controller.memory,
@@ -507,7 +511,7 @@ class TestFileSandboxPathValidation:
         sandbox_root = tmp_path / "safe"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "safe": PathConfig(
                     root=str(sandbox_root),
@@ -516,7 +520,7 @@ class TestFileSandboxPathValidation:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         # Directly test - paths outside sandbox should raise PermissionError
         # before approval is even checked
@@ -538,7 +542,7 @@ class TestFileSandboxPathValidation:
         sandbox_root = tmp_path / "readonly"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "readonly": PathConfig(
                     root=str(sandbox_root),
@@ -547,7 +551,7 @@ class TestFileSandboxPathValidation:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         # Writes to readonly should raise PermissionError before approval
         with pytest.raises(PermissionError) as exc_info:
@@ -565,7 +569,7 @@ class TestNeedsApprovalProtocol:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -574,7 +578,7 @@ class TestNeedsApprovalProtocol:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
         assert result is False
@@ -584,7 +588,7 @@ class TestNeedsApprovalProtocol:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -593,7 +597,7 @@ class TestNeedsApprovalProtocol:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
         assert isinstance(result, dict)
@@ -605,7 +609,7 @@ class TestNeedsApprovalProtocol:
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "data": PathConfig(
                     root=str(sandbox_root),
@@ -614,7 +618,7 @@ class TestNeedsApprovalProtocol:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         result = sandbox.needs_approval("list_files", {"path": "data"})
         assert result is False
@@ -628,12 +632,12 @@ class TestNeedsApprovalPresentation:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(root=str(sandbox_root), mode="rw", write_approval=True)
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         result = sandbox.needs_approval(
             "write_file", {"path": "output/test.txt", "content": "data"}
@@ -648,12 +652,12 @@ class TestNeedsApprovalPresentation:
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "data": PathConfig(root=str(sandbox_root), mode="ro", read_approval=True)
             }
         )
-        sandbox = FileSandboxImpl(config)
+        sandbox = FileSystemToolset(Sandbox(config))
 
         result = sandbox.needs_approval(
             "read_file", {"path": "data/test.txt"}
@@ -674,7 +678,7 @@ class TestNeedsApprovalPresentation:
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
-        config = FileSandboxConfig(
+        config = SandboxConfig(
             paths={
                 "output": PathConfig(
                     root=str(sandbox_root),
@@ -683,8 +687,8 @@ class TestNeedsApprovalPresentation:
                 )
             }
         )
-        sandbox = FileSandboxImpl(config)
-        approved_sandbox = FileSandboxApprovalToolset(
+        sandbox = FileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
             inner=sandbox,
             approval_callback=capture_callback,
         )
@@ -707,58 +711,3 @@ class TestNeedsApprovalPresentation:
         assert approval_requests[0].tool_args["path"] == "output/test.txt"
 
 
-class TestSimpleToolsWithoutNeedsApproval:
-    """Tests for simple tools that don't implement needs_approval."""
-
-    def test_toolset_without_needs_approval_always_prompts(self, tmp_path):
-        """Test that toolsets without needs_approval always prompt for tools in list.
-
-        This tests the core behavior: when a toolset doesn't implement needs_approval,
-        any tool in the require_approval list should always prompt for approval.
-        """
-
-        class SimpleToolset(AbstractToolset):
-            """A minimal toolset without needs_approval."""
-
-            @property
-            def id(self):
-                return "simple_toolset"
-
-            async def get_tools(self, ctx):
-                return {"do_something": MagicMock()}
-
-            async def call_tool(self, name, tool_args, ctx, tool):
-                if name == "do_something":
-                    return f"Did: {tool_args.get('action', 'nothing')}"
-                raise ValueError(f"Unknown tool: {name}")
-
-        approval_requests: list[ApprovalRequest] = []
-
-        def capture_callback(request: ApprovalRequest) -> ApprovalDecision:
-            approval_requests.append(request)
-            return ApprovalDecision(approved=True)
-
-        toolset = SimpleToolset()
-
-        approved_toolset = ApprovalToolset(
-            inner=toolset,
-            approval_callback=capture_callback,
-        )
-
-        ctx = MagicMock(spec=RunContext)
-        tool = MagicMock()
-
-        result = asyncio.run(
-            approved_toolset.call_tool(
-                "do_something",
-                {"action": "test"},
-                ctx,
-                tool,
-            )
-        )
-
-        # Should have prompted for approval with default presentation
-        assert len(approval_requests) == 1
-        assert approval_requests[0].tool_name == "do_something"
-        assert "do_something" in approval_requests[0].description
-        assert result == "Did: test"

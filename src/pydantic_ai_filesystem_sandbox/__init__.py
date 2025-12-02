@@ -1,63 +1,87 @@
 """Filesystem sandbox toolset for PydanticAI agents with LLM-friendly errors.
 
-This package provides a standalone, reusable filesystem sandbox for PydanticAI:
-- FileSandboxConfig and PathConfig for configuration
-- FileSandboxError classes with LLM-friendly messages
-- FileSandboxImpl implementation as a PydanticAI AbstractToolset
-- FileSandboxApprovalToolset for optional approval support
+This package provides a sandboxed filesystem for PydanticAI agents with:
+- Sandbox: Security boundary for permission checking and path resolution
+- FileSystemToolset: File I/O tools (read, write, edit, list)
+- LLM-friendly error messages that guide correction
 
-Usage (standalone - no approval):
-    from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig, PathConfig
+Architecture:
+    Sandbox handles policy (permissions, boundaries, approval requirements).
+    FileSystemToolset handles file I/O and implements needs_approval() for
+    integration with ApprovalToolset from pydantic-ai-blocking-approval.
 
-    config = FileSandboxConfig(paths={
-        "data": PathConfig(root="./data", mode="rw"),
-    })
-    sandbox = FileSandboxImpl(config)
-    agent = Agent(..., toolsets=[sandbox])
+Usage (simple):
+    from pydantic_ai_filesystem_sandbox import FileSystemToolset
 
-Usage (with approval - requires pydantic-ai-blocking-approval):
-    pip install pydantic-ai-filesystem-sandbox[approval]
+    toolset = FileSystemToolset.create_default("./data")
+    agent = Agent(..., toolsets=[toolset])
 
-    from pydantic_ai_filesystem_sandbox import FileSandboxImpl, FileSandboxConfig, PathConfig
-    from pydantic_ai_filesystem_sandbox.approval import FileSandboxApprovalToolset
-
-    config = FileSandboxConfig(paths={
-        "data": PathConfig(root="./data", mode="rw", write_approval=True),
-    })
-    sandbox = FileSandboxImpl(config)
-    approved_sandbox = FileSandboxApprovalToolset(
-        inner=sandbox,
-        approval_callback=my_prompt_fn,
+Usage (custom sandbox):
+    from pydantic_ai_filesystem_sandbox import (
+        FileSystemToolset, Sandbox, SandboxConfig, PathConfig
     )
-    agent = Agent(..., toolsets=[approved_sandbox])
+
+    config = SandboxConfig(paths={
+        "input": PathConfig(root="./input", mode="ro"),
+        "output": PathConfig(root="./output", mode="rw", write_approval=True),
+    })
+    sandbox = Sandbox(config)
+    toolset = FileSystemToolset(sandbox)
+    agent = Agent(..., toolsets=[toolset])
+
+Usage (with approval):
+    from pydantic_ai_filesystem_sandbox import FileSystemToolset, Sandbox, SandboxConfig, PathConfig
+    from pydantic_ai_blocking_approval import ApprovalToolset
+
+    sandbox = Sandbox(config)
+    toolset = FileSystemToolset(sandbox)
+    approved = ApprovalToolset(inner=toolset, approval_callback=my_callback)
+    agent = Agent(..., toolsets=[approved])
 """
 
 from .sandbox import (
-    DEFAULT_MAX_READ_CHARS,
-    EditError,
-    FileSandboxConfig,
-    FileSandboxError,
-    FileSandboxImpl,
-    FileTooLargeError,
+    # Configuration
     PathConfig,
+    SandboxConfig,
+    OSSandboxConfig,
+    # Sandbox
+    Sandbox,
+    # Errors
+    SandboxError,
     PathNotInSandboxError,
     PathNotWritableError,
-    ReadResult,
     SuffixNotAllowedError,
+    FileTooLargeError,
+    EditError,
 )
 
-__version__ = "0.5.0"
+from .toolset import (
+    # Toolset
+    FileSystemToolset,
+    # Read result
+    ReadResult,
+    DEFAULT_MAX_READ_CHARS,
+)
+
+__version__ = "0.6.0"
 
 __all__ = [
-    "DEFAULT_MAX_READ_CHARS",
-    "EditError",
-    "FileSandboxConfig",
-    "FileSandboxError",
-    "FileSandboxImpl",
-    "FileTooLargeError",
+    # Configuration
     "PathConfig",
+    "SandboxConfig",
+    "OSSandboxConfig",
+    # Sandbox (security boundary)
+    "Sandbox",
+    # Toolset (file I/O)
+    "FileSystemToolset",
+    # Read result
+    "ReadResult",
+    "DEFAULT_MAX_READ_CHARS",
+    # Errors
+    "SandboxError",
     "PathNotInSandboxError",
     "PathNotWritableError",
-    "ReadResult",
     "SuffixNotAllowedError",
+    "FileTooLargeError",
+    "EditError",
 ]

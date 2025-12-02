@@ -1,20 +1,20 @@
-"""File sandbox implementation with LLM-friendly errors.
+"""Sandbox: Permission checking and path resolution with LLM-friendly errors.
 
-This module provides a standalone, reusable filesystem sandbox for PydanticAI:
-- FileSandboxConfig and PathConfig for configuration
-- FileSandboxError classes with LLM-friendly messages
-- FileSandboxImpl implementation as a PydanticAI AbstractToolset
+This module provides the security boundary for filesystem access:
+- PathConfig and SandboxConfig for configuration
+- Sandbox class for permission checking and path resolution
+- LLM-friendly error classes
 
-For approval support, use FileSandboxApprovalToolset from the approval module.
+The Sandbox is a pure policy/validation layer - it doesn't perform file I/O.
+For file operations, use FileSystemToolset which wraps a Sandbox.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, TypeAdapter
-from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
-from pydantic_ai.tools import RunContext, ToolDefinition
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -47,13 +47,33 @@ class PathConfig(BaseModel):
     )
 
 
-class FileSandboxConfig(BaseModel):
-    """Configuration for a file sandbox."""
+class SandboxConfig(BaseModel):
+    """Configuration for a sandbox."""
 
     paths: dict[str, PathConfig] = Field(
         default_factory=dict,
         description="Named paths with their configurations",
     )
+    network_enabled: bool = Field(
+        default=True,
+        description="Whether network access is allowed (for OS sandbox)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# OS Sandbox Configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OSSandboxConfig:
+    """Configuration for OS-level sandbox setup (bubblewrap, etc.)."""
+
+    mounts: list[tuple[str, Path, Literal["ro", "rw"]]]
+    """List of (name, host_path, mode) tuples for bind mounts."""
+
+    network_enabled: bool
+    """Whether network access should be allowed."""
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +81,7 @@ class FileSandboxConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class FileSandboxError(Exception):
+class SandboxError(Exception):
     """Base class for sandbox errors with LLM-friendly messages.
 
     All sandbox errors include guidance on what IS allowed,
@@ -71,7 +91,7 @@ class FileSandboxError(Exception):
     pass
 
 
-class PathNotInSandboxError(FileSandboxError):
+class PathNotInSandboxError(SandboxError):
     """Raised when a path is outside all sandbox boundaries."""
 
     def __init__(self, path: str, readable_roots: list[str]):
@@ -85,7 +105,7 @@ class PathNotInSandboxError(FileSandboxError):
         super().__init__(self.message)
 
 
-class PathNotWritableError(FileSandboxError):
+class PathNotWritableError(SandboxError):
     """Raised when trying to write to a read-only path."""
 
     def __init__(self, path: str, writable_roots: list[str]):
@@ -99,7 +119,7 @@ class PathNotWritableError(FileSandboxError):
         super().__init__(self.message)
 
 
-class SuffixNotAllowedError(FileSandboxError):
+class SuffixNotAllowedError(SandboxError):
     """Raised when file suffix is not in the allowed list."""
 
     def __init__(self, path: str, suffix: str, allowed: list[str]):
@@ -114,7 +134,7 @@ class SuffixNotAllowedError(FileSandboxError):
         super().__init__(self.message)
 
 
-class FileTooLargeError(FileSandboxError):
+class FileTooLargeError(SandboxError):
     """Raised when file exceeds size limit."""
 
     def __init__(self, path: str, size: int, limit: int):
@@ -128,7 +148,7 @@ class FileTooLargeError(FileSandboxError):
         super().__init__(self.message)
 
 
-class EditError(FileSandboxError):
+class EditError(SandboxError):
     """Raised when edit operation fails."""
 
     def __init__(self, path: str, reason: str, old_text: str):
@@ -146,55 +166,49 @@ class EditError(FileSandboxError):
 
 
 # ---------------------------------------------------------------------------
-# Read Result
+# Sandbox Implementation
 # ---------------------------------------------------------------------------
 
 
-DEFAULT_MAX_READ_CHARS = 20_000
-"""Default maximum characters to read from a file."""
+class Sandbox:
+    """Security boundary for file access validation.
 
+    The Sandbox is responsible for:
+    - Path resolution (relative → absolute within boundaries)
+    - Permission checking (can_read, can_write)
+    - Approval requirements (needs_read_approval, needs_write_approval)
+    - Boundary enforcement (readable_roots, writable_roots)
+    - OS sandbox configuration export
 
-class ReadResult(BaseModel):
-    """Result of reading a file from the sandbox."""
+    This is a pure policy/validation layer - it doesn't perform file I/O.
+    For file operations, use FileSystemToolset which wraps a Sandbox.
 
-    content: str = Field(description="The file content read")
-    truncated: bool = Field(description="True if more content exists after this chunk")
-    total_chars: int = Field(description="Total file size in characters")
-    offset: int = Field(description="Starting character position used")
-    chars_read: int = Field(description="Number of characters actually returned")
+    Example:
+        config = SandboxConfig(paths={
+            "input": PathConfig(root="./input", mode="ro"),
+            "output": PathConfig(root="./output", mode="rw"),
+        })
+        sandbox = Sandbox(config)
 
-
-# ---------------------------------------------------------------------------
-# Implementation
-# ---------------------------------------------------------------------------
-
-
-class FileSandboxImpl(AbstractToolset[Any]):
-    """File sandbox implementation as a PydanticAI AbstractToolset.
-
-    Implements both the FileSandbox protocol and AbstractToolset interface.
-    Provides read_file, write_file, and list_files tools.
+        # Query permissions
+        if sandbox.can_write("output/file.txt"):
+            resolved = sandbox.resolve("output/file.txt")
+            # ... perform write operation
     """
 
     def __init__(
         self,
-        config: FileSandboxConfig,
+        config: SandboxConfig,
         base_path: Optional[Path] = None,
-        id: Optional[str] = None,
-        max_retries: int = 1,
     ):
-        """Initialize the file sandbox toolset.
+        """Initialize the sandbox.
 
         Args:
             config: Sandbox configuration
             base_path: Base path for resolving relative roots (defaults to cwd)
-            id: Optional toolset ID for durable execution
-            max_retries: Maximum number of retries for tool calls (default: 1)
         """
         self.config = config
         self._base_path = base_path or Path.cwd()
-        self._toolset_id = id
-        self._max_retries = max_retries
         self._paths: dict[str, tuple[Path, PathConfig]] = {}
         self._setup_paths()
 
@@ -210,25 +224,30 @@ class FileSandboxImpl(AbstractToolset[Any]):
             root.mkdir(parents=True, exist_ok=True)
             self._paths[name] = (root, path_config)
 
-    @property
-    def readable_roots(self) -> list[str]:
-        """List of readable path roots (for error messages)."""
-        return [name for name in self._paths.keys()]
+    # ---------------------------------------------------------------------------
+    # Path Resolution
+    # ---------------------------------------------------------------------------
 
-    @property
-    def writable_roots(self) -> list[str]:
-        """List of writable path roots (for error messages)."""
-        return [
-            name
-            for name, (_, config) in self._paths.items()
-            if config.mode == "rw"
-        ]
+    def resolve(self, path: str) -> Path:
+        """Resolve path within sandbox boundaries.
+
+        Args:
+            path: Relative or absolute path to resolve
+
+        Returns:
+            Resolved absolute Path
+
+        Raises:
+            PathNotInSandboxError: If path is outside sandbox boundaries
+        """
+        _, resolved, _ = self._find_path_for(path)
+        return resolved
 
     def _find_path_for(self, path: str) -> tuple[str, Path, PathConfig]:
         """Find which sandbox path contains the given path.
 
         Args:
-            path: Path to look up (can be "sandbox_name/relative" or absolute)
+            path: Path to look up (can be "sandbox_name", "sandbox_name/relative" or absolute)
 
         Returns:
             Tuple of (sandbox_name, resolved_path, path_config)
@@ -236,6 +255,11 @@ class FileSandboxImpl(AbstractToolset[Any]):
         Raises:
             PathNotInSandboxError: If path is not in any sandbox
         """
+        # Handle bare sandbox name (e.g., "output" -> returns sandbox root)
+        if path in self._paths:
+            root, config = self._paths[path]
+            return (path, root, config)
+
         # Handle "sandbox_name/relative/path" format
         if "/" in path and not path.startswith("/"):
             parts = path.split("/", 1)
@@ -287,17 +311,19 @@ class FileSandboxImpl(AbstractToolset[Any]):
         try:
             candidate.relative_to(root)
         except ValueError:
-            raise PathNotInSandboxError(
-                relative, self.readable_roots
-            )
+            raise PathNotInSandboxError(relative, self.readable_roots)
         return candidate
+
+    # ---------------------------------------------------------------------------
+    # Permission Checking
+    # ---------------------------------------------------------------------------
 
     def can_read(self, path: str) -> bool:
         """Check if path is readable within sandbox boundaries."""
         try:
             self._find_path_for(path)
             return True
-        except FileSandboxError:
+        except SandboxError:
             return False
 
     def can_write(self, path: str) -> bool:
@@ -305,25 +331,48 @@ class FileSandboxImpl(AbstractToolset[Any]):
         try:
             _, _, config = self._find_path_for(path)
             return config.mode == "rw"
-        except FileSandboxError:
+        except SandboxError:
             return False
 
-    def resolve(self, path: str) -> Path:
-        """Resolve path within sandbox.
+    def needs_read_approval(self, path: str) -> bool:
+        """Check if reading this path requires approval."""
+        try:
+            _, _, config = self._find_path_for(path)
+            return config.read_approval
+        except SandboxError:
+            return False
 
-        Args:
-            path: Relative or absolute path to resolve
+    def needs_write_approval(self, path: str) -> bool:
+        """Check if writing this path requires approval."""
+        try:
+            _, _, config = self._find_path_for(path)
+            return config.write_approval
+        except SandboxError:
+            return False
 
-        Returns:
-            Resolved absolute Path
+    # ---------------------------------------------------------------------------
+    # Boundary Info
+    # ---------------------------------------------------------------------------
 
-        Raises:
-            PathNotInSandboxError: If path is outside sandbox boundaries
-        """
-        _, resolved, _ = self._find_path_for(path)
-        return resolved
+    @property
+    def readable_roots(self) -> list[str]:
+        """List of readable path roots (for error messages)."""
+        return list(self._paths.keys())
 
-    def _check_suffix(self, path: Path, config: PathConfig) -> None:
+    @property
+    def writable_roots(self) -> list[str]:
+        """List of writable path roots (for error messages)."""
+        return [
+            name
+            for name, (_, config) in self._paths.items()
+            if config.mode == "rw"
+        ]
+
+    # ---------------------------------------------------------------------------
+    # Validation Helpers
+    # ---------------------------------------------------------------------------
+
+    def check_suffix(self, path: Path, config: PathConfig) -> None:
         """Check if file suffix is allowed.
 
         Raises:
@@ -335,7 +384,7 @@ class FileSandboxImpl(AbstractToolset[Any]):
             if suffix not in allowed:
                 raise SuffixNotAllowedError(str(path), suffix, config.suffixes)
 
-    def _check_size(self, path: Path, config: PathConfig) -> None:
+    def check_size(self, path: Path, config: PathConfig) -> None:
         """Check if file size is within limit.
 
         Raises:
@@ -346,449 +395,39 @@ class FileSandboxImpl(AbstractToolset[Any]):
             if size > config.max_file_bytes:
                 raise FileTooLargeError(str(path), size, config.max_file_bytes)
 
-    # ---------------------------------------------------------------------------
-    # Approval Helper (used by FileSandboxApprovalToolset)
-    # ---------------------------------------------------------------------------
+    def get_path_config(self, path: str) -> tuple[str, Path, PathConfig]:
+        """Get sandbox name, resolved path, and config for a path.
 
-    def needs_approval(
-        self, tool_name: str, args: dict[str, Any]
-    ) -> Union[bool, dict[str, Any]]:
-        """Check if the tool call requires approval based on PathConfig.
-
-        This is a helper method used by FileSandboxApprovalToolset.
-        Returns:
-        - False: No approval needed
-        - dict: Approval needed with custom description
-
-        Also validates paths and raises PermissionError for blocked operations.
+        This is useful for toolsets that need full path info.
 
         Args:
-            tool_name: Name of the tool being called
-            args: Tool arguments
+            path: Path to look up
 
         Returns:
-            False if no approval needed, or dict with description if needed
+            Tuple of (sandbox_name, resolved_path, path_config)
 
         Raises:
-            PermissionError: If operation is blocked entirely (path not in sandbox, etc.)
+            PathNotInSandboxError: If path is not in any sandbox
         """
-        path = args.get("path", "")
-
-        if tool_name == "write_file":
-            try:
-                sandbox_name, resolved, config = self._find_path_for(path)
-            except PathNotInSandboxError:
-                raise PermissionError(f"Path not in any sandbox: {path}")
-
-            if config.mode != "rw":
-                raise PermissionError(f"Path is read-only: {path}")
-
-            if not config.write_approval:
-                return False
-
-            # Approval needed - return custom description
-            return {"description": f"Write to {sandbox_name}/{path}"}
-
-        elif tool_name == "read_file":
-            try:
-                sandbox_name, resolved, config = self._find_path_for(path)
-            except PathNotInSandboxError:
-                raise PermissionError(f"Path not in any sandbox: {path}")
-
-            if not config.read_approval:
-                return False
-
-            # Approval needed - return custom description
-            return {"description": f"Read from {sandbox_name}/{path}"}
-
-        elif tool_name == "edit_file":
-            try:
-                sandbox_name, resolved, config = self._find_path_for(path)
-            except PathNotInSandboxError:
-                raise PermissionError(f"Path not in any sandbox: {path}")
-
-            if config.mode != "rw":
-                raise PermissionError(f"Path is read-only: {path}")
-
-            if not config.write_approval:
-                return False
-
-            # Approval needed - return custom description
-            return {"description": f"Edit {sandbox_name}/{path}"}
-
-        # list_files doesn't require approval
-        return False
+        return self._find_path_for(path)
 
     # ---------------------------------------------------------------------------
-    # File Operations
+    # OS Sandbox Integration
     # ---------------------------------------------------------------------------
 
-    def read(self, path: str, max_chars: int = DEFAULT_MAX_READ_CHARS, offset: int = 0) -> ReadResult:
-        """Read text file from sandbox.
+    def get_os_sandbox_config(self) -> OSSandboxConfig:
+        """Export configuration for OS-level sandbox setup.
 
-        Args:
-            path: Path to file (relative to sandbox)
-            max_chars: Maximum characters to read
-            offset: Character position to start reading from (default: 0)
+        Returns config suitable for setting up bubblewrap, Seatbelt, etc.
 
         Returns:
-            ReadResult with content, truncation info, and metadata
-
-        Raises:
-            PathNotInSandboxError: If path outside sandbox
-            SuffixNotAllowedError: If suffix not allowed
-            FileTooLargeError: If file too large
-            FileNotFoundError: If file doesn't exist
+            OSSandboxConfig with mount points and network settings
         """
-        name, resolved, config = self._find_path_for(path)
-
-        if not resolved.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-
-        if not resolved.is_file():
-            raise IsADirectoryError(f"Not a file: {path}")
-
-        self._check_suffix(resolved, config)
-        self._check_size(resolved, config)
-
-        text = resolved.read_text(encoding="utf-8")
-        total_chars = len(text)
-
-        # Apply offset
-        if offset > 0:
-            text = text[offset:]
-
-        # Apply max_chars limit
-        truncated = len(text) > max_chars
-        if truncated:
-            text = text[:max_chars]
-
-        return ReadResult(
-            content=text,
-            truncated=truncated,
-            total_chars=total_chars,
-            offset=offset,
-            chars_read=len(text),
+        mounts = [
+            (name, root, config.mode)
+            for name, (root, config) in self._paths.items()
+        ]
+        return OSSandboxConfig(
+            mounts=mounts,
+            network_enabled=self.config.network_enabled,
         )
-
-    def write(self, path: str, content: str) -> str:
-        """Write text file to sandbox.
-
-        Args:
-            path: Path to file (relative to sandbox)
-            content: Content to write
-
-        Returns:
-            Confirmation message
-
-        Raises:
-            PathNotInSandboxError: If path outside sandbox
-            PathNotWritableError: If path is read-only
-            SuffixNotAllowedError: If suffix not allowed
-        """
-        name, resolved, config = self._find_path_for(path)
-
-        if config.mode != "rw":
-            raise PathNotWritableError(path, self.writable_roots)
-
-        self._check_suffix(resolved, config)
-
-        # Check content size against limit
-        if config.max_file_bytes is not None:
-            content_bytes = len(content.encode("utf-8"))
-            if content_bytes > config.max_file_bytes:
-                raise FileTooLargeError(path, content_bytes, config.max_file_bytes)
-
-        # Create parent directories if needed
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-
-        resolved.write_text(content, encoding="utf-8")
-        return f"Written {len(content)} characters to {name}/{resolved.relative_to(self._paths[name][0])}"
-
-    def edit(self, path: str, old_text: str, new_text: str) -> str:
-        """Edit a file by replacing old_text with new_text.
-
-        This is a search/replace operation that requires an exact match.
-        The old_text must appear exactly once in the file.
-
-        Args:
-            path: Path to file (relative to sandbox)
-            old_text: Exact text to find and replace
-            new_text: Text to replace it with
-
-        Returns:
-            Confirmation message
-
-        Raises:
-            PathNotInSandboxError: If path outside sandbox
-            PathNotWritableError: If path is read-only
-            SuffixNotAllowedError: If suffix not allowed
-            EditError: If old_text not found or found multiple times
-            FileNotFoundError: If file doesn't exist
-        """
-        name, resolved, config = self._find_path_for(path)
-
-        if config.mode != "rw":
-            raise PathNotWritableError(path, self.writable_roots)
-
-        self._check_suffix(resolved, config)
-
-        if not resolved.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-
-        # Read current content
-        content = resolved.read_text(encoding="utf-8")
-
-        # Count occurrences
-        count = content.count(old_text)
-
-        if count == 0:
-            raise EditError(path, "text not found in file", old_text)
-        if count > 1:
-            raise EditError(
-                path, f"text found {count} times (must be unique)", old_text
-            )
-
-        # Perform the replacement
-        new_content = content.replace(old_text, new_text, 1)
-
-        # Check content size against limit
-        if config.max_file_bytes is not None:
-            content_bytes = len(new_content.encode("utf-8"))
-            if content_bytes > config.max_file_bytes:
-                raise FileTooLargeError(path, content_bytes, config.max_file_bytes)
-
-        resolved.write_text(new_content, encoding="utf-8")
-
-        rel_path = resolved.relative_to(self._paths[name][0])
-        return f"Edited {name}/{rel_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
-
-    def list_files(self, path: str = ".", pattern: str = "**/*") -> list[str]:
-        """List files matching pattern within sandbox.
-
-        Args:
-            path: Base path to search from (sandbox name or sandbox_name/subdir)
-            pattern: Glob pattern to match
-
-        Returns:
-            List of matching file paths (as sandbox_name/relative format)
-        """
-        # If path is "." or empty, list all sandboxes
-        if path in (".", ""):
-            results = []
-            for name, (root, _) in self._paths.items():
-                for match in root.glob(pattern):
-                    if match.is_file():
-                        try:
-                            rel = match.relative_to(root)
-                            results.append(f"{name}/{rel}")
-                        except ValueError:
-                            continue
-            return sorted(results)
-
-        # Otherwise, find the specific path
-        try:
-            name, resolved, _ = self._find_path_for(path)
-        except PathNotInSandboxError:
-            # Path might be just a sandbox name
-            if path in self._paths:
-                name = path
-                resolved, _ = self._paths[name]
-            else:
-                raise
-
-        root, _ = self._paths[name]
-        results = []
-        for match in resolved.glob(pattern):
-            if match.is_file():
-                try:
-                    rel = match.relative_to(root)
-                    results.append(f"{name}/{rel}")
-                except ValueError:
-                    continue
-        return sorted(results)
-
-    # ---------------------------------------------------------------------------
-    # AbstractToolset Implementation
-    # ---------------------------------------------------------------------------
-
-    @property
-    def id(self) -> str | None:
-        """Unique identifier for this toolset."""
-        return self._toolset_id
-
-    async def get_tools(self, ctx: RunContext[Any]) -> dict[str, ToolsetTool[Any]]:
-        """Return the tools provided by this toolset."""
-        tools = {}
-
-        # Define tool schemas
-        read_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
-                },
-                "max_chars": {
-                    "type": "integer",
-                    "default": DEFAULT_MAX_READ_CHARS,
-                    "description": f"Maximum characters to read (default {DEFAULT_MAX_READ_CHARS:,})",
-                },
-                "offset": {
-                    "type": "integer",
-                    "default": 0,
-                    "description": "Character position to start reading from (default 0)",
-                },
-            },
-            "required": ["path"],
-        }
-
-        write_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write to the file",
-                },
-            },
-            "required": ["path", "content"],
-        }
-
-        list_files_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "default": ".",
-                    "description": "Path format: 'sandbox_name' or 'sandbox_name/subdir' (default: '.')",
-                },
-                "pattern": {
-                    "type": "string",
-                    "default": "**/*",
-                    "description": "Glob pattern to match (default: '**/*')",
-                },
-            },
-        }
-
-        edit_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
-                },
-                "old_text": {
-                    "type": "string",
-                    "description": "Exact text to find (must match exactly and be unique)",
-                },
-                "new_text": {
-                    "type": "string",
-                    "description": "Text to replace old_text with",
-                },
-            },
-            "required": ["path", "old_text", "new_text"],
-        }
-
-        # Create ToolsetTool instances
-        tools["read_file"] = ToolsetTool(
-            toolset=self,
-            tool_def=ToolDefinition(
-                name="read_file",
-                description=(
-                    "Read a text file from the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'. "
-                    "Do not use this on binary files (PDFs, images, etc) - "
-                    "pass them as attachments instead."
-                ),
-                parameters_json_schema=read_file_schema,
-            ),
-            max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
-        )
-
-        tools["write_file"] = ToolsetTool(
-            toolset=self,
-            tool_def=ToolDefinition(
-                name="write_file",
-                description=(
-                    "Write a text file to the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'."
-                ),
-                parameters_json_schema=write_file_schema,
-            ),
-            max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
-        )
-
-        tools["list_files"] = ToolsetTool(
-            toolset=self,
-            tool_def=ToolDefinition(
-                name="list_files",
-                description=(
-                    "List files in the sandbox matching a glob pattern. "
-                    "Path format: 'sandbox_name' or 'sandbox_name/subdir'. "
-                    "Use '.' to list all sandboxes."
-                ),
-                parameters_json_schema=list_files_schema,
-            ),
-            max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
-        )
-
-        tools["edit_file"] = ToolsetTool(
-            toolset=self,
-            tool_def=ToolDefinition(
-                name="edit_file",
-                description=(
-                    "Edit a file by replacing exact text. "
-                    "The old_text must match exactly and appear only once. "
-                    "Path format: 'sandbox_name/relative/path'."
-                ),
-                parameters_json_schema=edit_file_schema,
-            ),
-            max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
-        )
-
-        return tools
-
-    async def call_tool(
-        self,
-        name: str,
-        tool_args: dict[str, Any],
-        ctx: RunContext[Any],
-        tool: ToolsetTool[Any],
-    ) -> Any:
-        """Call a tool with the given arguments.
-
-        Note: Approval checking is handled by ApprovalToolset via needs_approval().
-        This method just executes the operation.
-        """
-        if name == "read_file":
-            path = tool_args["path"]
-            max_chars = tool_args.get("max_chars", DEFAULT_MAX_READ_CHARS)
-            offset = tool_args.get("offset", 0)
-            return self.read(path, max_chars=max_chars, offset=offset)
-
-        elif name == "write_file":
-            path = tool_args["path"]
-            content = tool_args["content"]
-            return self.write(path, content)
-
-        elif name == "list_files":
-            path = tool_args.get("path", ".")
-            pattern = tool_args.get("pattern", "**/*")
-            return self.list_files(path, pattern)
-
-        elif name == "edit_file":
-            path = tool_args["path"]
-            old_text = tool_args["old_text"]
-            new_text = tool_args["new_text"]
-            return self.edit(path, old_text, new_text)
-
-        else:
-            raise ValueError(f"Unknown tool: {name}")
