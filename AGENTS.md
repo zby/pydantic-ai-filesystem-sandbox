@@ -14,12 +14,19 @@ Key expectations that frequently trip up automation agents. See `README.md` for 
 
 ## Architecture Overview
 
-This package provides a **filesystem sandbox toolset** for PydanticAI agents:
+This package provides a **filesystem sandbox toolset** for PydanticAI agents with separated concerns:
 
 ```
-FileSandboxImpl (AbstractToolset)
+Sandbox (security boundary)
+    ├── resolve() — path resolution within boundaries
+    ├── can_read() / can_write() — permission checking
+    ├── needs_read_approval() / needs_write_approval() — approval requirements
+    └── check_suffix() / check_size() — validation helpers
+
+FileSystemToolset (AbstractToolset)
     ├── read_file — read text files with truncation/offset
     ├── write_file — write text files (rw paths only)
+    ├── edit_file — search/replace editing
     ├── list_files — glob-based file listing
     └── needs_approval() — per-call approval decision (False | dict)
 
@@ -34,7 +41,8 @@ LLM-Friendly Errors
     ├── PathNotInSandboxError — includes list of valid paths
     ├── PathNotWritableError — includes writable paths
     ├── SuffixNotAllowedError — includes allowed suffixes
-    └── FileTooLargeError — includes size limit
+    ├── FileTooLargeError — includes size limit
+    └── EditError — includes search text preview
 ```
 
 ---
@@ -53,16 +61,34 @@ LLM-Friendly Errors
 
 | Module | Purpose |
 |--------|---------|
-| `sandbox.py` | Core implementation: config, errors, `FileSandboxImpl` toolset |
+| `sandbox.py` | Security boundary: `Sandbox`, `SandboxConfig`, `PathConfig`, errors |
+| `toolset.py` | File I/O tools: `FileSystemToolset`, `ReadResult` |
+| `approval.py` | Usage docs for ApprovalToolset integration |
 | `__init__.py` | Public API exports |
 
 ---
 
 ## Integration Patterns
 
-1. **Standalone**: Create `FileSandboxImpl` and pass to agent as toolset (no approval)
+1. **Standalone**: Create `Sandbox` + `FileSystemToolset` and pass to agent (no approval)
+   ```python
+   sandbox = Sandbox(config)
+   toolset = FileSystemToolset(sandbox)
+   agent = Agent(..., toolsets=[toolset])
+   ```
+
 2. **With Approval**: Wrap with `ApprovalToolset` from `pydantic-ai-blocking-approval`
-3. **Custom**: Extend `FileSandboxImpl` and override `needs_approval()` to return custom dict
+   ```python
+   sandbox = Sandbox(config)
+   toolset = FileSystemToolset(sandbox)
+   approved = ApprovalToolset(inner=toolset, approval_callback=callback)
+   agent = Agent(..., toolsets=[approved])
+   ```
+
+3. **Simple**: Use factory method for single-directory setups
+   ```python
+   toolset = FileSystemToolset.create_default("./data", mode="rw")
+   ```
 
 ---
 
@@ -79,8 +105,9 @@ LLM-Friendly Errors
 - Path format is `sandbox_name/relative/path` — don't use absolute paths
 - The `_base_path` defaults to `cwd()` — set it explicitly for reproducibility
 - Directories are auto-created on `_setup_paths()` — be aware of side effects
-- `needs_approval()` returns `False` or `dict` with description/payload — ApprovalToolset handles the rest
+- `needs_approval()` returns `False` or `dict` with description — ApprovalToolset handles the rest
 - All errors include guidance for the LLM — don't catch and re-raise without context
+- `Sandbox` is the policy layer, `FileSystemToolset` is the I/O layer — keep them separate
 
 ---
 
