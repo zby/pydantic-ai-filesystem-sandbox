@@ -10,7 +10,6 @@ When building LLM agents that interact with the filesystem, you need:
 2. **Read/Write Control** - Fine-grained permissions per path
 3. **LLM-Friendly Errors** - Error messages that help the LLM correct its behavior
 4. **Approval Integration** - Works with human-in-the-loop approval flows
-5. **OS Sandbox Support** - Export config for bubblewrap/Seatbelt enforcement
 
 ## Architecture
 
@@ -31,13 +30,6 @@ This package separates concerns into two layers:
 │   FileSystemToolset                                      │
 │   └── uses Sandbox                                       │
 └──────────────────────────────────────────────────────────┘
-                         │
-                         │ get_os_sandbox_config()
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│                    OS Layer (Optional)                   │
-│   bubblewrap / Seatbelt for kernel-enforced isolation   │
-└─────────────────────────────────────────────────────────┘
 ```
 
 ## Installation
@@ -98,13 +90,6 @@ agent = Agent("openai:gpt-4", toolsets=[toolset])
 | `max_file_bytes` | int \| None | None | Maximum file size limit |
 | `write_approval` | bool | True | Require approval for writes |
 | `read_approval` | bool | False | Require approval for reads |
-
-### SandboxConfig Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `paths` | dict[str, PathConfig] | {} | Named paths with configurations |
-| `network_enabled` | bool | True | Network access (for OS sandbox) |
 
 ### Example Configuration
 
@@ -234,35 +219,6 @@ agent = Agent(..., toolsets=[approved_toolset])
 
 `FileSystemToolset` implements `needs_approval()` which returns rich descriptions for the approval UI.
 
-## OS Sandbox Integration
-
-Export sandbox config for OS-level enforcement with bubblewrap or Seatbelt:
-
-```python
-from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, PathConfig
-
-config = SandboxConfig(
-    paths={
-        "input": PathConfig(root="./input", mode="ro"),
-        "output": PathConfig(root="./output", mode="rw"),
-    },
-    network_enabled=False,
-)
-sandbox = Sandbox(config)
-
-# Export for OS sandbox setup
-os_config = sandbox.get_os_sandbox_config()
-# os_config.mounts = [("input", Path("./input"), "ro"), ("output", Path("./output"), "rw")]
-# os_config.network_enabled = False
-
-# Generate bubblewrap args
-for name, path, mode in os_config.mounts:
-    if mode == "ro":
-        print(f"--ro-bind {path} /sandbox/{name}")
-    else:
-        print(f"--bind {path} /sandbox/{name}")
-```
-
 ## Using the Sandbox Directly
 
 The `Sandbox` class can be used independently for permission checking:
@@ -310,9 +266,8 @@ if result.truncated:
 
 ### Configuration
 
-- `SandboxConfig` - Top-level configuration with named paths and network settings
+- `SandboxConfig` - Top-level configuration with named paths
 - `PathConfig` - Configuration for a single sandbox path
-- `OSSandboxConfig` - Export format for OS-level sandbox setup
 
 ### Classes
 

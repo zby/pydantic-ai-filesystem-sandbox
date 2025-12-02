@@ -43,7 +43,6 @@ from .sandbox import (
     # Configuration
     PathConfig,
     SandboxConfig,
-    OSSandboxConfig,
     # Sandbox
     Sandbox,
     # Errors
@@ -69,7 +68,6 @@ __all__ = [
     # Configuration
     "PathConfig",
     "SandboxConfig",
-    "OSSandboxConfig",
     # Sandbox (security boundary)
     "Sandbox",
     # Toolset (file I/O)

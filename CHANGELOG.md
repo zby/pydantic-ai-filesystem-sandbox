@@ -7,9 +7,6 @@ All notable changes to this project will be documented in this file.
 ### Added
 - New `Sandbox` class: pure security boundary for permission checking and path resolution
 - New `FileSystemToolset` class: file I/O tools that use Sandbox
-- `OSSandboxConfig` dataclass for OS-level sandbox configuration
-- `Sandbox.get_os_sandbox_config()` method to export config for bubblewrap/Seatbelt
-- `SandboxConfig.network_enabled` field for OS sandbox network isolation
 - `FileSystemToolset.create_default()` factory for simple setups
 
 ### Changed

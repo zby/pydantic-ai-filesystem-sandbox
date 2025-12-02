@@ -10,7 +10,6 @@ For file operations, use FileSystemToolset which wraps a Sandbox.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
@@ -54,26 +53,6 @@ class SandboxConfig(BaseModel):
         default_factory=dict,
         description="Named paths with their configurations",
     )
-    network_enabled: bool = Field(
-        default=True,
-        description="Whether network access is allowed (for OS sandbox)",
-    )
-
-
-# ---------------------------------------------------------------------------
-# OS Sandbox Configuration
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class OSSandboxConfig:
-    """Configuration for OS-level sandbox setup (bubblewrap, etc.)."""
-
-    mounts: list[tuple[str, Path, Literal["ro", "rw"]]]
-    """List of (name, host_path, mode) tuples for bind mounts."""
-
-    network_enabled: bool
-    """Whether network access should be allowed."""
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +157,6 @@ class Sandbox:
     - Permission checking (can_read, can_write)
     - Approval requirements (needs_read_approval, needs_write_approval)
     - Boundary enforcement (readable_roots, writable_roots)
-    - OS sandbox configuration export
 
     This is a pure policy/validation layer - it doesn't perform file I/O.
     For file operations, use FileSystemToolset which wraps a Sandbox.
@@ -410,24 +388,3 @@ class Sandbox:
             PathNotInSandboxError: If path is not in any sandbox
         """
         return self._find_path_for(path)
-
-    # ---------------------------------------------------------------------------
-    # OS Sandbox Integration
-    # ---------------------------------------------------------------------------
-
-    def get_os_sandbox_config(self) -> OSSandboxConfig:
-        """Export configuration for OS-level sandbox setup.
-
-        Returns config suitable for setting up bubblewrap, Seatbelt, etc.
-
-        Returns:
-            OSSandboxConfig with mount points and network settings
-        """
-        mounts = [
-            (name, root, config.mode)
-            for name, (root, config) in self._paths.items()
-        ]
-        return OSSandboxConfig(
-            mounts=mounts,
-            network_enabled=self.config.network_enabled,
-        )
