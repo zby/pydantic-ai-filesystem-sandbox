@@ -147,7 +147,7 @@ class FileSystemToolset(AbstractToolset[Any]):
     # ---------------------------------------------------------------------------
 
     def needs_approval(
-        self, name: str, tool_args: dict[str, Any]
+        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
     ) -> Union[bool, dict[str, Any]]:
         """Check if the tool call requires approval.
 
@@ -156,6 +156,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         Args:
             name: Tool name being called
             tool_args: Arguments passed to the tool
+            ctx: PydanticAI run context (includes deps, model, usage, etc.)
 
         Returns:
             False: no approval needed

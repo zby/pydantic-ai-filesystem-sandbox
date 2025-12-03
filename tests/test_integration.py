@@ -524,8 +524,9 @@ class TestFileSandboxPathValidation:
 
         # Directly test - paths outside sandbox should raise PermissionError
         # before approval is even checked
+        ctx = MagicMock(spec=RunContext)
         with pytest.raises(PermissionError) as exc_info:
-            sandbox.needs_approval("write_file", {"path": "unknown/file.txt"})
+            sandbox.needs_approval("write_file", {"path": "unknown/file.txt"}, ctx)
 
         assert "not in any sandbox" in str(exc_info.value)
         assert not callback_called
@@ -554,8 +555,9 @@ class TestFileSandboxPathValidation:
         sandbox = FileSystemToolset(Sandbox(config))
 
         # Writes to readonly should raise PermissionError before approval
+        ctx = MagicMock(spec=RunContext)
         with pytest.raises(PermissionError) as exc_info:
-            sandbox.needs_approval("write_file", {"path": "readonly/file.txt"})
+            sandbox.needs_approval("write_file", {"path": "readonly/file.txt"}, ctx)
 
         assert "read-only" in str(exc_info.value)
         assert not callback_called
@@ -580,7 +582,8 @@ class TestNeedsApprovalProtocol:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
+        ctx = MagicMock(spec=RunContext)
+        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
         assert result is False
 
     def test_needs_approval_returns_dict_when_enabled(self, tmp_path):
@@ -599,7 +602,8 @@ class TestNeedsApprovalProtocol:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"})
+        ctx = MagicMock(spec=RunContext)
+        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
         assert isinstance(result, dict)
         assert "description" in result
         assert "Write to output" in result["description"]
@@ -620,7 +624,8 @@ class TestNeedsApprovalProtocol:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        result = sandbox.needs_approval("list_files", {"path": "data"})
+        ctx = MagicMock(spec=RunContext)
+        result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
         assert result is False
 
 
@@ -639,8 +644,9 @@ class TestNeedsApprovalPresentation:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
+        ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval(
-            "write_file", {"path": "output/test.txt", "content": "data"}
+            "write_file", {"path": "output/test.txt", "content": "data"}, ctx
         )
 
         assert isinstance(result, dict)
@@ -659,8 +665,9 @@ class TestNeedsApprovalPresentation:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
+        ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval(
-            "read_file", {"path": "data/test.txt"}
+            "read_file", {"path": "data/test.txt"}, ctx
         )
 
         assert isinstance(result, dict)
