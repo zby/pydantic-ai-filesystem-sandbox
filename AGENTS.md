@@ -34,7 +34,7 @@ See `README.md` for full documentation.
 - **Base path**: `_base_path` defaults to `cwd()` — set explicitly for reproducibility
 - **Auto-creation**: Directories are created on init — be aware of side effects
 - **Separation**: `Sandbox` = policy, `FileSystemToolset` = I/O — keep them separate
-- **Approval return**: `needs_approval()` returns `False` or `dict` with `description` key
+- **Approval return**: `needs_approval()` returns `ApprovalResult` (blocked/pre_approved/needs_approval)
 - **Error context**: All errors include guidance — don't catch and re-raise without it
 
 ---

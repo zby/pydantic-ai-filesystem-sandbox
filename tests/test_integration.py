@@ -11,6 +11,7 @@ from pydantic_ai_blocking_approval import (
     ApprovalController,
     ApprovalDecision,
     ApprovalRequest,
+    ApprovalResult,
     ApprovalToolset,
 )
 
@@ -500,14 +501,7 @@ class TestFileSandboxPathValidation:
     """Integration tests for path validation with approval."""
 
     def test_path_outside_sandbox_blocked(self, tmp_path):
-        """Test that paths outside sandbox are blocked before approval check."""
-        callback_called = False
-
-        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
-            nonlocal callback_called
-            callback_called = True
-            return ApprovalDecision(approved=True)
-
+        """Test that paths outside sandbox return blocked ApprovalResult."""
         sandbox_root = tmp_path / "safe"
         sandbox_root.mkdir()
 
@@ -522,24 +516,15 @@ class TestFileSandboxPathValidation:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        # Directly test - paths outside sandbox should raise PermissionError
-        # before approval is even checked
+        # Directly test - paths outside sandbox should return blocked result
         ctx = MagicMock(spec=RunContext)
-        with pytest.raises(PermissionError) as exc_info:
-            sandbox.needs_approval("write_file", {"path": "unknown/file.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "unknown/file.txt"}, ctx)
 
-        assert "not in any sandbox" in str(exc_info.value)
-        assert not callback_called
+        assert result.is_blocked
+        assert "not in any sandbox" in result.block_reason
 
     def test_readonly_path_blocked(self, tmp_path):
-        """Test that writes to readonly paths are blocked before approval check."""
-        callback_called = False
-
-        def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
-            nonlocal callback_called
-            callback_called = True
-            return ApprovalDecision(approved=True)
-
+        """Test that writes to readonly paths return blocked ApprovalResult."""
         sandbox_root = tmp_path / "readonly"
         sandbox_root.mkdir()
 
@@ -554,20 +539,19 @@ class TestFileSandboxPathValidation:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        # Writes to readonly should raise PermissionError before approval
+        # Writes to readonly should return blocked result
         ctx = MagicMock(spec=RunContext)
-        with pytest.raises(PermissionError) as exc_info:
-            sandbox.needs_approval("write_file", {"path": "readonly/file.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "readonly/file.txt"}, ctx)
 
-        assert "read-only" in str(exc_info.value)
-        assert not callback_called
+        assert result.is_blocked
+        assert "read-only" in result.block_reason
 
 
 class TestNeedsApprovalProtocol:
     """Tests for the ApprovalConfigurable protocol implementation."""
 
-    def test_needs_approval_returns_false_when_disabled(self, tmp_path):
-        """Test needs_approval returns False when approval is disabled."""
+    def test_needs_approval_returns_pre_approved_when_disabled(self, tmp_path):
+        """Test needs_approval returns pre_approved when approval is disabled."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -584,10 +568,10 @@ class TestNeedsApprovalProtocol:
 
         ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
-        assert result is False
+        assert result.is_pre_approved
 
-    def test_needs_approval_returns_dict_when_enabled(self, tmp_path):
-        """Test needs_approval returns dict with presentation when approval is enabled."""
+    def test_needs_approval_returns_needs_approval_when_enabled(self, tmp_path):
+        """Test needs_approval returns needs_approval when approval is enabled."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -604,11 +588,9 @@ class TestNeedsApprovalProtocol:
 
         ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
-        assert isinstance(result, dict)
-        assert "description" in result
-        assert "Write to output" in result["description"]
+        assert result.is_needs_approval
 
-    def test_needs_approval_for_list_files_always_false(self, tmp_path):
+    def test_needs_approval_for_list_files_always_pre_approved(self, tmp_path):
         """Test that list_files never requires approval."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
@@ -626,14 +608,14 @@ class TestNeedsApprovalProtocol:
 
         ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
-        assert result is False
+        assert result.is_pre_approved
 
 
-class TestNeedsApprovalPresentation:
-    """Tests for presentation returned by needs_approval()."""
+class TestGetApprovalDescription:
+    """Tests for get_approval_description() method."""
 
-    def test_needs_approval_write_presentation(self, tmp_path):
-        """Test needs_approval returns nice description for writes."""
+    def test_get_approval_description_write(self, tmp_path):
+        """Test get_approval_description returns nice description for writes."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -645,16 +627,16 @@ class TestNeedsApprovalPresentation:
         sandbox = FileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval(
+        desc = sandbox.get_approval_description(
             "write_file", {"path": "output/test.txt", "content": "data"}, ctx
         )
 
-        assert isinstance(result, dict)
-        assert "description" in result
-        assert "Write to output" in result["description"]
+        assert "Write" in desc
+        assert "4 chars" in desc  # len("data") = 4
+        assert "output" in desc
 
-    def test_needs_approval_read_presentation(self, tmp_path):
-        """Test needs_approval returns nice description for reads."""
+    def test_get_approval_description_read(self, tmp_path):
+        """Test get_approval_description returns nice description for reads."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
@@ -666,16 +648,36 @@ class TestNeedsApprovalPresentation:
         sandbox = FileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval(
+        desc = sandbox.get_approval_description(
             "read_file", {"path": "data/test.txt"}, ctx
         )
 
-        assert isinstance(result, dict)
-        assert "description" in result
-        assert "Read from data" in result["description"]
+        assert "Read from" in desc
+        assert "data" in desc
 
-    def test_approval_uses_needs_approval_presentation(self, tmp_path):
-        """Test that ApprovalToolset uses needs_approval dict for nice descriptions."""
+    def test_get_approval_description_edit(self, tmp_path):
+        """Test get_approval_description returns nice description for edits."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw", write_approval=True)
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        ctx = MagicMock(spec=RunContext)
+        desc = sandbox.get_approval_description(
+            "edit_file", {"path": "output/test.txt", "old_text": "old", "new_text": "new"}, ctx
+        )
+
+        assert "Edit" in desc
+        assert "3 chars" in desc  # len("old") = len("new") = 3
+        assert "output" in desc
+
+    def test_approval_uses_get_approval_description(self, tmp_path):
+        """Test that ApprovalToolset uses get_approval_description for nice descriptions."""
         approval_requests: list[ApprovalRequest] = []
 
         def capture_callback(request: ApprovalRequest) -> ApprovalDecision:
@@ -712,9 +714,10 @@ class TestNeedsApprovalPresentation:
             )
         )
 
-        # Check that the approval request has nice description from needs_approval dict
+        # Check that the approval request has nice description from get_approval_description
         assert len(approval_requests) == 1
-        assert "Write to output" in approval_requests[0].description
+        assert "Write" in approval_requests[0].description
+        assert "4 chars" in approval_requests[0].description
         assert approval_requests[0].tool_args["path"] == "output/test.txt"
 
 
