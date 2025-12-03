@@ -1,6 +1,8 @@
 # AGENTS.md — Field Guide for AI Agents
 
-Key expectations that frequently trip up automation agents. See `README.md` for full documentation.
+Filesystem sandbox for PydanticAI agents. Separates security policy (Sandbox) from file I/O (FileSystemToolset).
+
+See `README.md` for full documentation.
 
 ---
 
