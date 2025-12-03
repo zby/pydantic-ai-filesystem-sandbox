@@ -2073,8 +2073,8 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-blocking-approval"
-version = "0.5.0"
-source = { git = "https://github.com/zby/pydantic-ai-blocking-approval.git?rev=main#3f973c23e59a9ae17210fc8abc962f483349d0f7" }
+version = "0.7.0"
+source = { git = "https://github.com/zby/pydantic-ai-blocking-approval.git?branch=main#104ce7d077210caaa1f5dc29a90e86915917f2f5" }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai" },
@@ -2082,7 +2082,6 @@ dependencies = [
 
 [[package]]
 name = "pydantic-ai-filesystem-sandbox"
-version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -2105,7 +2104,7 @@ dev = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai", specifier = ">=0.1" },
-    { name = "pydantic-ai-blocking-approval", marker = "extra == 'approval'", git = "https://github.com/zby/pydantic-ai-blocking-approval.git?rev=main" },
+    { name = "pydantic-ai-blocking-approval", marker = "extra == 'approval'", git = "https://github.com/zby/pydantic-ai-blocking-approval.git?branch=main" },
 ]
 
 [package.metadata.requires-dev]

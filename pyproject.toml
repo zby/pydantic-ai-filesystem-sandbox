@@ -42,8 +42,7 @@ dependencies = [
 # [dependency-groups] is the newer PEP 735 standard used by uv
 [project.optional-dependencies]
 approval = [
-    # For testing: use GitHub repo directly
-    "pydantic-ai-blocking-approval @ git+https://github.com/zby/pydantic-ai-blocking-approval.git@main",
+    "pydantic-ai-blocking-approval>=0.7.0",  # Requires ApprovalResult
 ]
 
 [dependency-groups]
@@ -57,9 +56,6 @@ dev = [
 Homepage = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
 Repository = "https://github.com/zby/pydantic-ai-filesystem-sandbox"
 
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.version]
 path = "src/pydantic_ai_filesystem_sandbox/__init__.py"
 
@@ -68,3 +64,7 @@ packages = ["src/pydantic_ai_filesystem_sandbox"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Development source overrides (not used when installing from PyPI)
+[tool.uv.sources]
+pydantic-ai-blocking-approval = { git = "https://github.com/zby/pydantic-ai-blocking-approval.git", branch = "main" }
