@@ -44,3 +44,12 @@ See `README.md` for full documentation.
 - **Never** `git add -A` — review `git status` and stage specific files
 - Check `git diff` before committing
 - Write clear commit messages (why, not just what)
+
+---
+
+## Notes
+
+- `docs/notes/` — working design documents, explorations, bug investigations
+- Create notes to offload complex thinking that doesn't fit in a commit or TODO
+- Include "Open Questions" section for unresolved decisions
+- Move to `docs/notes/archive/` when resolved or implemented
