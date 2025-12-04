@@ -360,3 +360,231 @@ class TestSandboxEdit:
 
         with pytest.raises(FileNotFoundError, match="not found"):
             sandbox.edit("output/nonexistent.txt", "old", "new")
+
+
+class TestSandboxDelete:
+    """Tests for FileSystemToolset.delete() functionality."""
+
+    def test_delete_removes_file(self, tmp_path):
+        """FileSystemToolset.delete() removes the file."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.delete("output/test.txt")
+        assert "Deleted" in result
+        assert not test_file.exists()
+
+    def test_delete_readonly_raises(self, tmp_path):
+        """FileSystemToolset.delete() raises for read-only paths."""
+        sandbox_root = tmp_path / "input"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.txt"
+        test_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "input": PathConfig(root=str(sandbox_root), mode="ro")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(PathNotWritableError, match="read-only"):
+            sandbox.delete("input/test.txt")
+
+    def test_delete_file_not_found(self, tmp_path):
+        """FileSystemToolset.delete() raises when file doesn't exist."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(FileNotFoundError, match="not found"):
+            sandbox.delete("output/nonexistent.txt")
+
+
+class TestSandboxMove:
+    """Tests for FileSystemToolset.move() functionality."""
+
+    def test_move_renames_file(self, tmp_path):
+        """FileSystemToolset.move() renames a file."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        src_file = sandbox_root / "old.txt"
+        src_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.move("output/old.txt", "output/new.txt")
+        assert "Moved" in result
+        assert not src_file.exists()
+        assert (sandbox_root / "new.txt").read_text() == "content"
+
+    def test_move_creates_parent_directories(self, tmp_path):
+        """FileSystemToolset.move() creates parent directories for destination."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        src_file = sandbox_root / "file.txt"
+        src_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.move("output/file.txt", "output/subdir/nested/file.txt")
+        assert not src_file.exists()
+        assert (sandbox_root / "subdir" / "nested" / "file.txt").read_text() == "content"
+
+    def test_move_destination_exists_raises(self, tmp_path):
+        """FileSystemToolset.move() raises when destination exists."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        (sandbox_root / "src.txt").write_text("source", encoding="utf-8")
+        (sandbox_root / "dst.txt").write_text("dest", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(FileExistsError, match="already exists"):
+            sandbox.move("output/src.txt", "output/dst.txt")
+
+    def test_move_readonly_source_raises(self, tmp_path):
+        """FileSystemToolset.move() raises for read-only source."""
+        input_root = tmp_path / "input"
+        input_root.mkdir()
+        (input_root / "file.txt").write_text("content", encoding="utf-8")
+
+        output_root = tmp_path / "output"
+        output_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "input": PathConfig(root=str(input_root), mode="ro"),
+                "output": PathConfig(root=str(output_root), mode="rw"),
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(PathNotWritableError, match="read-only"):
+            sandbox.move("input/file.txt", "output/file.txt")
+
+
+class TestSandboxCopy:
+    """Tests for FileSystemToolset.copy() functionality."""
+
+    def test_copy_duplicates_file(self, tmp_path):
+        """FileSystemToolset.copy() copies a file."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        src_file = sandbox_root / "original.txt"
+        src_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.copy("output/original.txt", "output/copy.txt")
+        assert "Copied" in result
+        assert src_file.exists()  # Source still exists
+        assert (sandbox_root / "copy.txt").read_text() == "content"
+
+    def test_copy_from_readonly_to_writable(self, tmp_path):
+        """FileSystemToolset.copy() can copy from read-only to writable."""
+        input_root = tmp_path / "input"
+        input_root.mkdir()
+        (input_root / "file.txt").write_text("content", encoding="utf-8")
+
+        output_root = tmp_path / "output"
+        output_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "input": PathConfig(root=str(input_root), mode="ro"),
+                "output": PathConfig(root=str(output_root), mode="rw"),
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.copy("input/file.txt", "output/file.txt")
+        assert (output_root / "file.txt").read_text() == "content"
+
+    def test_copy_creates_parent_directories(self, tmp_path):
+        """FileSystemToolset.copy() creates parent directories for destination."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        (sandbox_root / "file.txt").write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        result = sandbox.copy("output/file.txt", "output/deep/nested/copy.txt")
+        assert (sandbox_root / "deep" / "nested" / "copy.txt").read_text() == "content"
+
+    def test_copy_destination_exists_raises(self, tmp_path):
+        """FileSystemToolset.copy() raises when destination exists."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        (sandbox_root / "src.txt").write_text("source", encoding="utf-8")
+        (sandbox_root / "dst.txt").write_text("dest", encoding="utf-8")
+
+        config = SandboxConfig(
+            paths={
+                "output": PathConfig(root=str(sandbox_root), mode="rw")
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(FileExistsError, match="already exists"):
+            sandbox.copy("output/src.txt", "output/dst.txt")
+
+    def test_copy_to_readonly_raises(self, tmp_path):
+        """FileSystemToolset.copy() raises for read-only destination."""
+        input_root = tmp_path / "input"
+        input_root.mkdir()
+        (input_root / "file.txt").write_text("content", encoding="utf-8")
+
+        readonly_root = tmp_path / "readonly"
+        readonly_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "input": PathConfig(root=str(input_root), mode="ro"),
+                "readonly": PathConfig(root=str(readonly_root), mode="ro"),
+            }
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(PathNotWritableError, match="read-only"):
+            sandbox.copy("input/file.txt", "readonly/file.txt")

@@ -72,7 +72,8 @@ class ReadResult(BaseModel):
 class FileSystemToolset(AbstractToolset[Any]):
     """File I/O toolset for PydanticAI agents.
 
-    Provides read_file, write_file, edit_file, and list_files tools.
+    Provides file operation tools: read_file, write_file, edit_file, delete_file,
+    move_file, copy_file, and list_files.
     Uses a Sandbox for permission checking and path resolution.
 
     For approval integration, use ApprovableFileSystemToolset from
@@ -193,6 +194,8 @@ class FileSystemToolset(AbstractToolset[Any]):
 
     def write(self, path: str, content: str) -> str:
         """Write text file to sandbox.
+
+        Parent directories are created automatically if they don't exist.
 
         Args:
             path: Path to file (relative to sandbox)
@@ -338,6 +341,150 @@ class FileSystemToolset(AbstractToolset[Any]):
                     continue
         return sorted(results)
 
+    def delete(self, path: str) -> str:
+        """Delete a file from the sandbox.
+
+        Args:
+            path: Path to file (relative to sandbox)
+
+        Returns:
+            Confirmation message
+
+        Raises:
+            PathNotInSandboxError: If path outside sandbox
+            PathNotWritableError: If path is read-only
+            FileNotFoundError: If file doesn't exist
+        """
+        name, resolved, config = self._sandbox.get_path_config(path)
+
+        if config.mode != "rw":
+            raise PathNotWritableError(path, self._sandbox.writable_roots)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        if not resolved.is_file():
+            raise IsADirectoryError(f"Cannot delete directory with delete_file: {path}")
+
+        resolved.unlink()
+
+        # Get sandbox root for relative path calculation
+        sandbox_root = self._sandbox.resolve(name)
+        try:
+            rel_path = resolved.relative_to(sandbox_root)
+        except ValueError:
+            rel_path = resolved.name
+
+        return f"Deleted {name}/{rel_path}"
+
+    def move(self, source: str, destination: str) -> str:
+        """Move or rename a file within the sandbox.
+
+        Parent directories of destination are created automatically.
+
+        Args:
+            source: Source path (relative to sandbox)
+            destination: Destination path (relative to sandbox)
+
+        Returns:
+            Confirmation message
+
+        Raises:
+            PathNotInSandboxError: If path outside sandbox
+            PathNotWritableError: If source or destination is read-only
+            FileNotFoundError: If source doesn't exist
+            FileExistsError: If destination already exists
+        """
+        # Check source
+        src_name, src_resolved, src_config = self._sandbox.get_path_config(source)
+
+        if src_config.mode != "rw":
+            raise PathNotWritableError(source, self._sandbox.writable_roots)
+
+        if not src_resolved.exists():
+            raise FileNotFoundError(f"Source file not found: {source}")
+
+        if not src_resolved.is_file():
+            raise IsADirectoryError(f"Cannot move directory: {source}")
+
+        self._sandbox.check_suffix(src_resolved, src_config)
+
+        # Check destination
+        dst_name, dst_resolved, dst_config = self._sandbox.get_path_config(destination)
+
+        if dst_config.mode != "rw":
+            raise PathNotWritableError(destination, self._sandbox.writable_roots)
+
+        if dst_resolved.exists():
+            raise FileExistsError(f"Destination already exists: {destination}")
+
+        self._sandbox.check_suffix(dst_resolved, dst_config)
+
+        # Create parent directories if needed
+        dst_resolved.parent.mkdir(parents=True, exist_ok=True)
+
+        # Move the file
+        src_resolved.rename(dst_resolved)
+
+        return f"Moved {src_name}/{src_resolved.name} to {dst_name}/{dst_resolved.name}"
+
+    def copy(self, source: str, destination: str) -> str:
+        """Copy a file within the sandbox.
+
+        Parent directories of destination are created automatically.
+
+        Args:
+            source: Source path (relative to sandbox)
+            destination: Destination path (relative to sandbox)
+
+        Returns:
+            Confirmation message
+
+        Raises:
+            PathNotInSandboxError: If path outside sandbox
+            PathNotWritableError: If destination is read-only
+            FileNotFoundError: If source doesn't exist
+            FileExistsError: If destination already exists
+        """
+        import shutil
+
+        # Check source (only needs to be readable)
+        src_name, src_resolved, src_config = self._sandbox.get_path_config(source)
+
+        if not src_resolved.exists():
+            raise FileNotFoundError(f"Source file not found: {source}")
+
+        if not src_resolved.is_file():
+            raise IsADirectoryError(f"Cannot copy directory: {source}")
+
+        self._sandbox.check_suffix(src_resolved, src_config)
+        self._sandbox.check_size(src_resolved, src_config)
+
+        # Check destination
+        dst_name, dst_resolved, dst_config = self._sandbox.get_path_config(destination)
+
+        if dst_config.mode != "rw":
+            raise PathNotWritableError(destination, self._sandbox.writable_roots)
+
+        if dst_resolved.exists():
+            raise FileExistsError(f"Destination already exists: {destination}")
+
+        self._sandbox.check_suffix(dst_resolved, dst_config)
+
+        # Check size limit on destination
+        if dst_config.max_file_bytes is not None:
+            src_size = src_resolved.stat().st_size
+            if src_size > dst_config.max_file_bytes:
+                raise FileTooLargeError(destination, src_size, dst_config.max_file_bytes)
+
+        # Create parent directories if needed
+        dst_resolved.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy the file
+        shutil.copy2(src_resolved, dst_resolved)
+
+        return f"Copied {src_name}/{src_resolved.name} to {dst_name}/{dst_resolved.name}"
+
     # ---------------------------------------------------------------------------
     # AbstractToolset Implementation
     # ---------------------------------------------------------------------------
@@ -423,6 +570,47 @@ class FileSystemToolset(AbstractToolset[Any]):
             "required": ["path", "old_text", "new_text"],
         }
 
+        delete_file_schema = {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path format: 'sandbox_name/relative/path'",
+                },
+            },
+            "required": ["path"],
+        }
+
+        move_file_schema = {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Source path format: 'sandbox_name/relative/path'",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination path format: 'sandbox_name/relative/path'",
+                },
+            },
+            "required": ["source", "destination"],
+        }
+
+        copy_file_schema = {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Source path format: 'sandbox_name/relative/path'",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "Destination path format: 'sandbox_name/relative/path'",
+                },
+            },
+            "required": ["source", "destination"],
+        }
+
         # Create ToolsetTool instances
         tools["read_file"] = ToolsetTool(
             toolset=self,
@@ -446,6 +634,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 name="write_file",
                 description=(
                     "Write a text file to the sandbox. "
+                    "Parent directories are created automatically. "
                     "Path format: 'sandbox_name/relative/path'."
                 ),
                 parameters_json_schema=write_file_schema,
@@ -479,6 +668,50 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Path format: 'sandbox_name/relative/path'."
                 ),
                 parameters_json_schema=edit_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        tools["delete_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="delete_file",
+                description=(
+                    "Delete a file from the sandbox. "
+                    "Path format: 'sandbox_name/relative/path'."
+                ),
+                parameters_json_schema=delete_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        tools["move_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="move_file",
+                description=(
+                    "Move or rename a file within the sandbox. "
+                    "Parent directories of destination are created automatically. "
+                    "Path format: 'sandbox_name/relative/path'."
+                ),
+                parameters_json_schema=move_file_schema,
+            ),
+            max_retries=self._max_retries,
+            args_validator=TypeAdapter(dict[str, Any]).validator,
+        )
+
+        tools["copy_file"] = ToolsetTool(
+            toolset=self,
+            tool_def=ToolDefinition(
+                name="copy_file",
+                description=(
+                    "Copy a file within the sandbox. "
+                    "Parent directories of destination are created automatically. "
+                    "Path format: 'sandbox_name/relative/path'."
+                ),
+                parameters_json_schema=copy_file_schema,
             ),
             max_retries=self._max_retries,
             args_validator=TypeAdapter(dict[str, Any]).validator,
@@ -519,6 +752,20 @@ class FileSystemToolset(AbstractToolset[Any]):
             old_text = tool_args["old_text"]
             new_text = tool_args["new_text"]
             return self.edit(path, old_text, new_text)
+
+        elif name == "delete_file":
+            path = tool_args["path"]
+            return self.delete(path)
+
+        elif name == "move_file":
+            source = tool_args["source"]
+            destination = tool_args["destination"]
+            return self.move(source, destination)
+
+        elif name == "copy_file":
+            source = tool_args["source"]
+            destination = tool_args["destination"]
+            return self.copy(source, destination)
 
         else:
             raise ValueError(f"Unknown tool: {name}")

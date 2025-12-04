@@ -114,6 +114,71 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         elif name == "list_files":
             return ApprovalResult.pre_approved()
 
+        elif name == "delete_file":
+            try:
+                sandbox_name, resolved, config = self._sandbox.get_path_config(path)
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Path not in any sandbox: {path}")
+
+            if config.mode != "rw":
+                return ApprovalResult.blocked(f"Path is read-only: {path}")
+
+            if not config.write_approval:
+                return ApprovalResult.pre_approved()
+
+            return ApprovalResult.needs_approval()
+
+        elif name == "move_file":
+            source = tool_args.get("source", "")
+            destination = tool_args.get("destination", "")
+
+            # Check source
+            try:
+                src_name, _, src_config = self._sandbox.get_path_config(source)
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Source not in any sandbox: {source}")
+
+            if src_config.mode != "rw":
+                return ApprovalResult.blocked(f"Source is read-only: {source}")
+
+            # Check destination
+            try:
+                dst_name, _, dst_config = self._sandbox.get_path_config(destination)
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Destination not in any sandbox: {destination}")
+
+            if dst_config.mode != "rw":
+                return ApprovalResult.blocked(f"Destination is read-only: {destination}")
+
+            if not src_config.write_approval and not dst_config.write_approval:
+                return ApprovalResult.pre_approved()
+
+            return ApprovalResult.needs_approval()
+
+        elif name == "copy_file":
+            source = tool_args.get("source", "")
+            destination = tool_args.get("destination", "")
+
+            # Check source (only needs read)
+            try:
+                src_name, _, src_config = self._sandbox.get_path_config(source)
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Source not in any sandbox: {source}")
+
+            # Check destination
+            try:
+                dst_name, _, dst_config = self._sandbox.get_path_config(destination)
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Destination not in any sandbox: {destination}")
+
+            if dst_config.mode != "rw":
+                return ApprovalResult.blocked(f"Destination is read-only: {destination}")
+
+            if not dst_config.write_approval:
+                return ApprovalResult.pre_approved()
+
+            return ApprovalResult.needs_approval()
+
         # Unknown tool - require approval
         return ApprovalResult.needs_approval()
 
@@ -157,5 +222,38 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         elif name == "list_files":
             pattern = tool_args.get("pattern", "**/*")
             return f"List files in {display_path} matching {pattern}"
+
+        elif name == "delete_file":
+            return f"Delete {display_path}"
+
+        elif name == "move_file":
+            source = tool_args.get("source", "")
+            destination = tool_args.get("destination", "")
+            try:
+                src_name, _, _ = self._sandbox.get_path_config(source)
+                src_display = f"{src_name}/{source.split('/', 1)[-1] if '/' in source else source}"
+            except PathNotInSandboxError:
+                src_display = source
+            try:
+                dst_name, _, _ = self._sandbox.get_path_config(destination)
+                dst_display = f"{dst_name}/{destination.split('/', 1)[-1] if '/' in destination else destination}"
+            except PathNotInSandboxError:
+                dst_display = destination
+            return f"Move {src_display} to {dst_display}"
+
+        elif name == "copy_file":
+            source = tool_args.get("source", "")
+            destination = tool_args.get("destination", "")
+            try:
+                src_name, _, _ = self._sandbox.get_path_config(source)
+                src_display = f"{src_name}/{source.split('/', 1)[-1] if '/' in source else source}"
+            except PathNotInSandboxError:
+                src_display = source
+            try:
+                dst_name, _, _ = self._sandbox.get_path_config(destination)
+                dst_display = f"{dst_name}/{destination.split('/', 1)[-1] if '/' in destination else destination}"
+            except PathNotInSandboxError:
+                dst_display = destination
+            return f"Copy {src_display} to {dst_display}"
 
         return f"{name}({path})"

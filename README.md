@@ -118,7 +118,7 @@ config = SandboxConfig(paths={
 
 ## Available Tools
 
-The toolset provides four tools to the agent:
+The toolset provides seven tools to the agent:
 
 ### read_file
 
@@ -134,7 +134,7 @@ Parameters:
 
 ### write_file
 
-Write a text file to the sandbox (requires `mode="rw"`).
+Write a text file to the sandbox (requires `mode="rw"`). Parent directories are created automatically.
 
 ```
 Path format: 'sandbox_name/relative/path'
@@ -153,6 +153,38 @@ Parameters:
   - path: str (required)
   - old_text: str (required) - must match exactly and be unique
   - new_text: str (required)
+```
+
+### delete_file
+
+Delete a file from the sandbox (requires `mode="rw"`).
+
+```
+Path format: 'sandbox_name/relative/path'
+Parameters:
+  - path: str (required)
+```
+
+### move_file
+
+Move or rename a file within the sandbox (requires `mode="rw"` for both source and destination). Parent directories are created automatically.
+
+```
+Path format: 'sandbox_name/relative/path'
+Parameters:
+  - source: str (required)
+  - destination: str (required)
+```
+
+### copy_file
+
+Copy a file within the sandbox. Source can be read-only, destination requires `mode="rw"`. Parent directories are created automatically.
+
+```
+Path format: 'sandbox_name/relative/path'
+Parameters:
+  - source: str (required)
+  - destination: str (required)
 ```
 
 ### list_files
