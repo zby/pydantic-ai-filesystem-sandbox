@@ -196,7 +196,9 @@ Searched for: 'old text...'"
 Works with [pydantic-ai-blocking-approval](https://github.com/zby/pydantic-ai-blocking-approval) for human-in-the-loop:
 
 ```python
-from pydantic_ai_filesystem_sandbox import FileSystemToolset, Sandbox, SandboxConfig, PathConfig
+from pydantic_ai_filesystem_sandbox import (
+    ApprovableFileSystemToolset, Sandbox, SandboxConfig, PathConfig
+)
 from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
 
 # Create sandbox and toolset
@@ -204,7 +206,7 @@ config = SandboxConfig(paths={
     "output": PathConfig(root="./output", mode="rw", write_approval=True),
 })
 sandbox = Sandbox(config)
-toolset = FileSystemToolset(sandbox)
+toolset = ApprovableFileSystemToolset(sandbox)
 
 # Wrap with approval
 controller = ApprovalController(mode="interactive")
@@ -217,7 +219,7 @@ approved_toolset = ApprovalToolset(
 agent = Agent(..., toolsets=[approved_toolset])
 ```
 
-`FileSystemToolset` implements `needs_approval()` (returns `ApprovalResult`) and `get_approval_description()` for the approval UI.
+`ApprovableFileSystemToolset` extends `FileSystemToolset` with `needs_approval()` (returns `ApprovalResult`) and `get_approval_description()` for the approval UI.
 
 ## Using the Sandbox Directly
 
@@ -273,6 +275,7 @@ if result.truncated:
 
 - `Sandbox` - Security boundary for permission checking and path resolution
 - `FileSystemToolset` - PydanticAI AbstractToolset with file I/O tools
+- `ApprovableFileSystemToolset` - FileSystemToolset with approval protocol support
 
 ### Errors
 

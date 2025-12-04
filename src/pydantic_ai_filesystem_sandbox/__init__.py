@@ -3,12 +3,14 @@
 This package provides a sandboxed filesystem for PydanticAI agents with:
 - Sandbox: Security boundary for permission checking and path resolution
 - FileSystemToolset: File I/O tools (read, write, edit, list)
+- ApprovableFileSystemToolset: FileSystemToolset with approval protocol support
 - LLM-friendly error messages that guide correction
 
 Architecture:
     Sandbox handles policy (permissions, boundaries, approval requirements).
-    FileSystemToolset handles file I/O and implements needs_approval() for
-    integration with ApprovalToolset from pydantic-ai-blocking-approval.
+    FileSystemToolset handles file I/O.
+    ApprovableFileSystemToolset adds needs_approval() for integration with
+    ApprovalToolset from pydantic-ai-blocking-approval.
 
 Usage (simple):
     from pydantic_ai_filesystem_sandbox import FileSystemToolset
@@ -23,18 +25,23 @@ Usage (custom sandbox):
 
     config = SandboxConfig(paths={
         "input": PathConfig(root="./input", mode="ro"),
-        "output": PathConfig(root="./output", mode="rw", write_approval=True),
+        "output": PathConfig(root="./output", mode="rw"),
     })
     sandbox = Sandbox(config)
     toolset = FileSystemToolset(sandbox)
     agent = Agent(..., toolsets=[toolset])
 
 Usage (with approval):
-    from pydantic_ai_filesystem_sandbox import FileSystemToolset, Sandbox, SandboxConfig, PathConfig
+    from pydantic_ai_filesystem_sandbox import (
+        ApprovableFileSystemToolset, Sandbox, SandboxConfig, PathConfig
+    )
     from pydantic_ai_blocking_approval import ApprovalToolset
 
+    config = SandboxConfig(paths={
+        "output": PathConfig(root="./output", mode="rw", write_approval=True),
+    })
     sandbox = Sandbox(config)
-    toolset = FileSystemToolset(sandbox)
+    toolset = ApprovableFileSystemToolset(sandbox)
     approved = ApprovalToolset(inner=toolset, approval_callback=my_callback)
     agent = Agent(..., toolsets=[approved])
 """
@@ -62,6 +69,11 @@ from .toolset import (
     DEFAULT_MAX_READ_CHARS,
 )
 
+from .approval_toolset import (
+    # Approvable toolset
+    ApprovableFileSystemToolset,
+)
+
 __version__ = "0.6.0"
 
 __all__ = [
@@ -72,6 +84,8 @@ __all__ = [
     "Sandbox",
     # Toolset (file I/O)
     "FileSystemToolset",
+    # Approvable toolset (with approval protocol)
+    "ApprovableFileSystemToolset",
     # Read result
     "ReadResult",
     "DEFAULT_MAX_READ_CHARS",
