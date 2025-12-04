@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2025-01-04
+
+### Added
+- New `ApprovableFileSystemToolset` class: extends `FileSystemToolset` with approval protocol
+- New `delete_file` tool: delete files from sandbox
+- New `move_file` tool: move/rename files (auto-creates parent directories)
+- New `copy_file` tool: copy files (source can be read-only)
+
+### Changed
+- **Breaking**: `pydantic-ai-blocking-approval` is now a required dependency (was optional)
+- **Breaking**: `needs_approval()` and `get_approval_description()` moved from `FileSystemToolset` to `ApprovableFileSystemToolset`
+- `write_file` now documents that parent directories are created automatically
+- Requires `pydantic-ai-blocking-approval>=0.7.0`
+
+### Migration
+```python
+# Old (0.6.0) - if using approval
+from pydantic_ai_filesystem_sandbox import FileSystemToolset
+toolset = FileSystemToolset(sandbox)
+approved = ApprovalToolset(inner=toolset, ...)
+
+# New (0.7.0) - use ApprovableFileSystemToolset for approval
+from pydantic_ai_filesystem_sandbox import ApprovableFileSystemToolset
+toolset = ApprovableFileSystemToolset(sandbox)
+approved = ApprovalToolset(inner=toolset, ...)
+
+# If NOT using approval, FileSystemToolset still works unchanged
+from pydantic_ai_filesystem_sandbox import FileSystemToolset
+toolset = FileSystemToolset(sandbox)  # No changes needed
+```
+
 ## [0.6.0] - 2025-12-02
 
 ### Added
