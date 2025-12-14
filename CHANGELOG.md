@@ -2,17 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.0] - 2025-01-04
+## [0.8.0] - 2025-01-14
 
 ### Added
 - New `ApprovableFileSystemToolset` class: extends `FileSystemToolset` with approval protocol
 - New `delete_file` tool: delete files from sandbox
 - New `move_file` tool: move/rename files (auto-creates parent directories)
 - New `copy_file` tool: copy files (source can be read-only)
+- New `RootSandboxConfig`: single-root sandbox mode where a host directory becomes virtual `/`
+- New `Sandbox.derive()` method: create restricted child sandboxes with allowlists
+- New `SandboxPermissionEscalationError`: raised when child derivation would expand permissions
 
 ### Changed
 - **Breaking**: `pydantic-ai-blocking-approval` is now a required dependency (was optional)
 - **Breaking**: `needs_approval()` and `get_approval_description()` moved from `FileSystemToolset` to `ApprovableFileSystemToolset`
+- **Breaking**: `SandboxConfig` now requires exactly one of `root` or `paths` (cannot be empty or have both)
 - `write_file` now documents that parent directories are created automatically
 - Requires `pydantic-ai-blocking-approval>=0.7.0`
 
@@ -31,6 +35,14 @@ approved = ApprovalToolset(inner=toolset, ...)
 # If NOT using approval, FileSystemToolset still works unchanged
 from pydantic_ai_filesystem_sandbox import FileSystemToolset
 toolset = FileSystemToolset(sandbox)  # No changes needed
+
+# Old (0.6.0) - SandboxConfig with empty paths
+config = SandboxConfig()  # No longer valid
+
+# New (0.7.0) - must specify root or paths
+config = SandboxConfig(paths={"data": PathConfig(root="./data")})
+# Or use root mode:
+config = SandboxConfig(root=RootSandboxConfig(root="."))
 ```
 
 ## [0.6.0] - 2025-12-02

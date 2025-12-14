@@ -30,12 +30,14 @@ See `README.md` for full documentation.
 
 ## Common Pitfalls
 
-- **Path format**: Use `sandbox_name/relative/path`, not absolute paths
+- **Path format**: Multi-path mode uses `sandbox_name/relative/path`; root-mode uses `/relative/path`
+- **Config choice**: `SandboxConfig` requires exactly one of `root` (single-root) or `paths` (multi-path)
 - **Base path**: `_base_path` defaults to `cwd()` — set explicitly for reproducibility
 - **Auto-creation**: Directories are created on init — be aware of side effects
 - **Separation**: `Sandbox` = policy, `FileSystemToolset` = I/O — keep them separate
 - **Approval return**: `needs_approval()` returns `ApprovalResult` (blocked/pre_approved/needs_approval)
 - **Error context**: All errors include guidance — don't catch and re-raise without it
+- **Derive safety**: `Sandbox.derive()` creates restricted children — default is empty (no access)
 
 ---
 

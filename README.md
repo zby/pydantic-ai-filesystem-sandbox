@@ -330,8 +330,9 @@ if result.truncated:
 
 ### Configuration
 
-- `SandboxConfig` - Top-level configuration with named paths
-- `PathConfig` - Configuration for a single sandbox path
+- `SandboxConfig` - Top-level configuration (requires exactly one of `root` or `paths`)
+- `RootSandboxConfig` - Single-root sandbox configuration (virtual `/`)
+- `PathConfig` - Configuration for a named sandbox path
 
 ### Classes
 
@@ -344,6 +345,7 @@ if result.truncated:
 - `SandboxError` - Base class for all sandbox errors
 - `PathNotInSandboxError` - Path outside sandbox boundaries
 - `PathNotWritableError` - Write to read-only path
+- `SandboxPermissionEscalationError` - Child sandbox attempted to expand permissions
 - `SuffixNotAllowedError` - File extension not allowed
 - `FileTooLargeError` - File exceeds size limit
 - `EditError` - Edit operation failed (text not found or not unique)
