@@ -1,4 +1,4 @@
-"""Tests for root-mode sandboxes and derive allowlists."""
+"""Tests for root-mount sandboxes and derive allowlists."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,8 +14,8 @@ from pydantic_ai_filesystem_sandbox import (
 )
 
 
-class TestRootModeSandbox:
-    def test_root_mode_resolves_relative_and_absolute(self, tmp_path: Path) -> None:
+class TestRootMountSandbox:
+    def test_root_mount_resolves_relative_and_absolute(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
         (root / "src").mkdir(parents=True)
         file_path = root / "src" / "a.txt"
@@ -31,7 +31,7 @@ class TestRootModeSandbox:
         assert sb.readable_roots == ["/"]
         assert sb.writable_roots == ["/"]
 
-    def test_root_mode_blocks_traversal_and_symlink_escape(
+    def test_root_mount_blocks_traversal_and_symlink_escape(
         self, tmp_path: Path
     ) -> None:
         root = tmp_path / "proj"
@@ -142,8 +142,8 @@ class TestDeriveAllowlistsMultiPath:
             parent.derive(inherit=True, readonly=False)
 
 
-class TestDeriveAllowlistsRootMode:
-    def test_derive_allow_read_root_mode(self, tmp_path: Path) -> None:
+class TestDeriveAllowlistsRootMount:
+    def test_derive_allow_read_root_mount(self, tmp_path: Path) -> None:
         root = tmp_path / "proj"
         (root / "src").mkdir(parents=True)
         (root / "docs").mkdir(parents=True)
@@ -186,8 +186,8 @@ class TestNestedDerivation:
         assert grandchild.can_read("/data/sub/deep/b.txt")
         assert not grandchild.can_read("/data/other.txt")
 
-    def test_nested_derive_root_mode(self, tmp_path: Path) -> None:
-        """Child of derived root-mode sandbox can further narrow access."""
+    def test_nested_derive_root_mount(self, tmp_path: Path) -> None:
+        """Child of derived root-mount sandbox can further narrow access."""
         root = tmp_path / "proj"
         (root / "src" / "core").mkdir(parents=True)
         (root / "src" / "a.py").write_text("a", encoding="utf-8")
@@ -227,4 +227,3 @@ class TestNestedDerivation:
         grandchild = child.derive(allow_write="/output/dir1")
         assert grandchild.can_write("/output/dir1/file.txt")
         assert not grandchild.can_write("/output/dir2/file.txt")
-

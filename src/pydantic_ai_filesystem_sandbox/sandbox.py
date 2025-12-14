@@ -97,6 +97,12 @@ class SandboxConfig(BaseModel):
         description="List of directory mounts",
     )
 
+    @model_validator(mode="after")
+    def _validate_mounts(self) -> "SandboxConfig":
+        if not self.mounts:
+            raise ValueError("SandboxConfig requires at least one mount")
+        return self
+
     def get_mounts(self) -> list[Mount]:
         """Get the configured mounts."""
         return self.mounts

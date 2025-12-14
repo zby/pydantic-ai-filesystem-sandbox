@@ -19,7 +19,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Nested mounts now allowed**: mounts like `/data` and `/data/special` can coexist; the most specific mount wins
 - Simplified internal derive system (consolidated state variables)
-- `check_suffix()` and `check_size()` now accept optional `display_path` parameter
+- `check_suffix()` and `check_size()` now require `virtual_path` for safe, virtual-path errors
 - Terminology: error messages now use "mount" instead of "sandbox"
 
 ## [0.9.0] - 2025-01-14

@@ -38,7 +38,7 @@ class FileSystemToolset(FunctionToolset):
         """Read a text file from the sandbox.
 
         Args:
-            path: Path format 'sandbox_name/relative/path'
+            path: Path format '/mount/relative/path' (e.g., '/docs/readme.md')
             max_chars: Maximum characters to read
             offset: Character position to start from
         """

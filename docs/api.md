@@ -17,7 +17,7 @@ Top-level configuration for a sandbox.
 
 ```python
 class SandboxConfig(BaseModel):
-    mounts: list[Mount]  # Docker-style directory mounts
+    mounts: list[Mount]  # Docker-style directory mounts (at least one required)
 ```
 
 Example:
@@ -133,8 +133,7 @@ def check_suffix(
     path: Path,
     mount: Mount,
     *,
-    mount_point: str,
-    virtual_path: str | None = None,
+    virtual_path: str,
 ) -> None
 
 def check_size(
@@ -142,14 +141,13 @@ def check_size(
     path: Path,
     mount: Mount,
     *,
-    mount_point: str,
-    virtual_path: str | None = None,
+    virtual_path: str,
 ) -> None
 ```
 
 Validate file suffix and size against mount config limits.
 
-- `virtual_path`: Optional original virtual path for error messages; if omitted, sandbox formats a safe virtual display path
+- `virtual_path`: Virtual path to use for error messages (avoid leaking host paths)
 - **Raises**: `SuffixNotAllowedError`, `FileTooLargeError`
 
 ### Properties
@@ -397,4 +395,3 @@ All errors inherit from `SandboxError` and include LLM-friendly messages with gu
 | `SuffixNotAllowedError` | File extension not in allowed list |
 | `FileTooLargeError` | File exceeds size limit |
 | `EditError` | Edit failed (text not found or not unique) |
-

@@ -30,8 +30,8 @@ See `README.md` for full documentation.
 
 ## Common Pitfalls
 
-- **Path format**: Multi-path mode uses `sandbox_name/relative/path`; root-mode uses `/relative/path`
-- **Config choice**: `SandboxConfig` requires exactly one of `root` (single-root) or `paths` (multi-path)
+- **Path format**: Always use `/mount/relative/path` (e.g., `/docs/readme.md`)
+- **Config choice**: `SandboxConfig` requires `mounts=[Mount(...)]` (at least one mount)
 - **Base path**: `_base_path` defaults to `cwd()` — set explicitly for reproducibility
 - **Auto-creation**: Directories are created on init — be aware of side effects
 - **Separation**: `Sandbox` = policy, `FileSystemToolset` = I/O — keep them separate
