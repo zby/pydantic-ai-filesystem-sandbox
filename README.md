@@ -31,14 +31,14 @@ from pydantic_ai_filesystem_sandbox import (
     FileSystemToolset,
     Sandbox,
     SandboxConfig,
-    PathConfig,
+    Mount,
 )
 
-# Configure sandbox paths
-config = SandboxConfig(paths={
-    "input": PathConfig(root="./data/input", mode="ro"),   # Read-only
-    "output": PathConfig(root="./data/output", mode="rw"), # Read-write
-})
+# Configure sandbox with Docker-style mounts
+config = SandboxConfig(mounts=[
+    Mount(host_path="./data/input", mount_point="/input", mode="ro"),   # Read-only
+    Mount(host_path="./data/output", mount_point="/output", mode="rw"), # Read-write
+])
 
 # Create the sandbox (security boundary)
 sandbox = Sandbox(config)
@@ -49,6 +49,8 @@ toolset = FileSystemToolset(sandbox)
 # Use with PydanticAI agent
 agent = Agent("openai:gpt-4", toolsets=[toolset])
 ```
+
+The agent can now access files using virtual paths like `/input/data.txt` and `/output/results.json`.
 
 ### Simple Usage
 
@@ -67,11 +69,12 @@ agent = Agent("openai:gpt-4", toolsets=[toolset])
 
 See [API Reference](docs/api.md#configuration) for complete details.
 
-### PathConfig Options
+### Mount Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `root` | str | required | Root directory path |
+| `host_path` | Path | required | Host directory to mount |
+| `mount_point` | str | required | Virtual path (e.g., "/docs", "/data") |
 | `mode` | "ro" \| "rw" | "ro" | Access mode |
 | `suffixes` | list[str] \| None | None | Allowed file extensions (None = all) |
 | `max_file_bytes` | int \| None | None | Maximum file size limit |
@@ -81,36 +84,43 @@ See [API Reference](docs/api.md#configuration) for complete details.
 ### Example Configuration
 
 ```python
-config = SandboxConfig(paths={
+from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, Mount
+
+config = SandboxConfig(mounts=[
     # Read-only input - any file type
-    "input": PathConfig(
-        root="./data/input",
+    Mount(
+        host_path="./data/input",
+        mount_point="/input",
         mode="ro",
     ),
     # Read-write output - only markdown and text
-    "output": PathConfig(
-        root="./data/output",
+    Mount(
+        host_path="./data/output",
+        mount_point="/output",
         mode="rw",
         suffixes=[".md", ".txt"],
         max_file_bytes=1_000_000,  # 1MB limit
     ),
     # Config files - read-only, requires approval
-    "config": PathConfig(
-        root="./config",
+    Mount(
+        host_path="./config",
+        mount_point="/config",
         mode="ro",
         read_approval=True,
     ),
-})
+])
 ```
 
-### [RootSandboxConfig](docs/api.md#rootsandboxconfig) (single root)
+### Single Root Mount
 
-You can configure a sandbox as a single virtual `/` rooted at a host directory:
+For projects where you want the entire directory as virtual `/`:
 
 ```python
-from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, RootSandboxConfig
+from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, Mount
 
-config = SandboxConfig(root=RootSandboxConfig(root=".", readonly=False))
+config = SandboxConfig(mounts=[
+    Mount(host_path=".", mount_point="/", mode="rw"),
+])
 sandbox = Sandbox(config)
 
 sandbox.resolve("/src/main.py")  # -> <cwd>/src/main.py
@@ -127,10 +137,10 @@ parent = Sandbox(config)
 child = parent.derive()
 
 # Allow read-only access to a subtree
-reader = parent.derive(allow_read="output/reports")
+reader = parent.derive(allow_read="/output/reports")
 
 # Allow read/write access to a subtree
-writer = parent.derive(allow_write="output/reports")
+writer = parent.derive(allow_write="/output/reports")
 ```
 
 ## Available Tools
@@ -142,7 +152,7 @@ The [toolset](docs/api.md#filesystemtoolset) provides seven tools to the agent:
 Read a text file from the sandbox.
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path' (e.g., '/docs/file.txt')
 Parameters:
   - path: str (required)
   - max_chars: int (default: 20,000)
@@ -154,7 +164,7 @@ Parameters:
 Write a text file to the sandbox (requires `mode="rw"`). Parent directories are created automatically.
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path' (e.g., '/output/file.txt')
 Parameters:
   - path: str (required)
   - content: str (required)
@@ -165,7 +175,7 @@ Parameters:
 Edit a file by replacing exact text (requires `mode="rw"`).
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path'
 Parameters:
   - path: str (required)
   - old_text: str (required) - must match exactly and be unique
@@ -177,7 +187,7 @@ Parameters:
 Delete a file from the sandbox (requires `mode="rw"`).
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path'
 Parameters:
   - path: str (required)
 ```
@@ -187,7 +197,7 @@ Parameters:
 Move or rename a file within the sandbox (requires `mode="rw"` for both source and destination). Parent directories are created automatically.
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path'
 Parameters:
   - source: str (required)
   - destination: str (required)
@@ -198,7 +208,7 @@ Parameters:
 Copy a file within the sandbox. Source can be read-only, destination requires `mode="rw"`. Parent directories are created automatically.
 
 ```
-Path format: 'sandbox_name/relative/path'
+Path format: '/mount/path'
 Parameters:
   - source: str (required)
   - destination: str (required)
@@ -210,7 +220,7 @@ List files matching a glob pattern.
 
 ```
 Parameters:
-  - path: str (default: "." for all sandboxes)
+  - path: str (default: "/" for all mounts)
   - pattern: str (default: "**/*")
 ```
 
@@ -220,23 +230,23 @@ All [errors](docs/api.md#errors) include guidance on what IS allowed:
 
 ```python
 # PathNotInSandboxError
-"Cannot access 'secret/file.txt': path is outside sandbox.
-Readable paths: input, output"
+"Cannot access '/secret/file.txt': path is outside sandbox.
+Readable paths: /input, /output"
 
 # PathNotWritableError
-"Cannot write to 'input/file.txt': path is read-only.
-Writable paths: output"
+"Cannot write to '/input/file.txt': path is read-only.
+Writable paths: /output"
 
 # SuffixNotAllowedError
-"Cannot access 'output/data.json': suffix '.json' not allowed.
+"Cannot access '/output/data.json': suffix '.json' not allowed.
 Allowed suffixes: .md, .txt"
 
 # FileTooLargeError
-"Cannot read 'output/huge.txt': file too large (5,000,000 bytes).
+"Cannot read '/output/huge.txt': file too large (5,000,000 bytes).
 Maximum allowed: 1,000,000 bytes"
 
 # EditError
-"Cannot edit 'output/file.txt': text not found in file.
+"Cannot edit '/output/file.txt': text not found in file.
 Searched for: 'old text...'"
 ```
 
@@ -246,14 +256,14 @@ Works with [pydantic-ai-blocking-approval](https://github.com/zby/pydantic-ai-bl
 
 ```python
 from pydantic_ai_filesystem_sandbox import (
-    ApprovableFileSystemToolset, Sandbox, SandboxConfig, PathConfig
+    ApprovableFileSystemToolset, Sandbox, SandboxConfig, Mount
 )
 from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
 
 # Create sandbox and toolset
-config = SandboxConfig(paths={
-    "output": PathConfig(root="./output", mode="rw", write_approval=True),
-})
+config = SandboxConfig(mounts=[
+    Mount(host_path="./output", mount_point="/output", mode="rw", write_approval=True),
+])
 sandbox = Sandbox(config)
 toolset = ApprovableFileSystemToolset(sandbox)
 
@@ -278,16 +288,16 @@ The [`Sandbox`](docs/api.md#sandbox) class can be used independently for permiss
 sandbox = Sandbox(config)
 
 # Check permissions
-if sandbox.can_write("output/file.txt"):
-    resolved = sandbox.resolve("output/file.txt")
+if sandbox.can_write("/output/file.txt"):
+    resolved = sandbox.resolve("/output/file.txt")
     # ... perform operation
 
 # Query boundaries
-print(sandbox.readable_roots)  # ["input", "output"]
-print(sandbox.writable_roots)  # ["output"]
+print(sandbox.readable_roots)  # ["/input", "/output"]
+print(sandbox.writable_roots)  # ["/output"]
 
 # Check approval requirements
-sandbox.needs_write_approval("output/file.txt")  # True/False
+sandbox.needs_write_approval("/output/file.txt")  # True/False
 ```
 
 ## [ReadResult](docs/api.md#readresult)
@@ -307,10 +317,10 @@ This allows agents to handle large files by reading in chunks:
 
 ```python
 # First read
-result = toolset.read("input/large.txt", max_chars=10000)
+result = toolset.read("/input/large.txt", max_chars=10000)
 if result.truncated:
     # Continue reading
-    result2 = toolset.read("input/large.txt", max_chars=10000, offset=10000)
+    result2 = toolset.read("/input/large.txt", max_chars=10000, offset=10000)
 ```
 
 ## API Reference

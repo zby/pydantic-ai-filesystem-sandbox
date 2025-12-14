@@ -36,7 +36,7 @@ from pydantic_ai.tools import RunContext, ToolDefinition
 from .sandbox import (
     EditError,
     FileTooLargeError,
-    PathConfig,
+    Mount,
     PathNotInSandboxError,
     PathNotWritableError,
     Sandbox,
@@ -109,15 +109,19 @@ class FileSystemToolset(AbstractToolset[Any]):
         self._max_retries = max_retries
 
     @staticmethod
-    def _format_result_path(name: str, rel: str | Path) -> str:
+    def _format_result_path(mount_point: str, rel: str | Path) -> str:
+        """Format a result path from mount point and relative path.
+
+        Always returns paths in /mount/relative format.
+        """
         rel_str = rel.as_posix() if isinstance(rel, Path) else str(rel)
-        if name == "/":
+        if mount_point == "/":
             if not rel_str or rel_str == ".":
                 return "/"
             return f"/{rel_str.lstrip('/')}"
         if not rel_str or rel_str == ".":
-            return name
-        return f"{name}/{rel_str}"
+            return mount_point
+        return f"{mount_point}/{rel_str.lstrip('/')}"
 
     @classmethod
     def create_default(
@@ -126,7 +130,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         mode: str = "rw",
         id: Optional[str] = None,
     ) -> "FileSystemToolset":
-        """Create a toolset with a single default sandbox path.
+        """Create a toolset with a single root mount.
 
         Convenience factory for simple use cases.
 
@@ -136,10 +140,10 @@ class FileSystemToolset(AbstractToolset[Any]):
             id: Optional toolset ID
 
         Returns:
-            FileSystemToolset with a single "data" path
+            FileSystemToolset with root mounted at "/"
         """
         config = SandboxConfig(
-            paths={"data": PathConfig(root=str(root), mode=mode)}  # type: ignore
+            mounts=[Mount(host_path=Path(root), mount_point="/", mode=mode)]  # type: ignore
         )
         sandbox = Sandbox(config)
         return cls(sandbox, id=id)
@@ -159,7 +163,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         """Read text file from sandbox.
 
         Args:
-            path: Path to file (relative to sandbox)
+            path: Virtual path to file (e.g., "/docs/file.txt")
             max_chars: Maximum characters to read
             offset: Character position to start reading from (default: 0)
 
@@ -172,7 +176,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileTooLargeError: If file too large
             FileNotFoundError: If file doesn't exist
         """
-        name, resolved, config = self._sandbox.get_path_config(path)
+        mount_point, resolved, mount = self._sandbox.get_path_config(path)
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -180,8 +184,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not resolved.is_file():
             raise IsADirectoryError(f"Not a file: {path}")
 
-        self._sandbox.check_suffix(resolved, config)
-        self._sandbox.check_size(resolved, config)
+        self._sandbox.check_suffix(resolved, mount)
+        self._sandbox.check_size(resolved, mount)
 
         text = resolved.read_text(encoding="utf-8")
         total_chars = len(text)
@@ -209,7 +213,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         Parent directories are created automatically if they don't exist.
 
         Args:
-            path: Path to file (relative to sandbox)
+            path: Virtual path to file (e.g., "/output/file.txt")
             content: Content to write
 
         Returns:
@@ -220,32 +224,32 @@ class FileSystemToolset(AbstractToolset[Any]):
             PathNotWritableError: If path is read-only
             SuffixNotAllowedError: If suffix not allowed
         """
-        name, resolved, config = self._sandbox.get_path_config(path)
+        mount_point, resolved, mount = self._sandbox.get_path_config(path)
 
-        if config.mode != "rw":
+        if mount.mode != "rw":
             raise PathNotWritableError(path, self._sandbox.writable_roots)
 
-        self._sandbox.check_suffix(resolved, config)
+        self._sandbox.check_suffix(resolved, mount)
 
         # Check content size against limit
-        if config.max_file_bytes is not None:
+        if mount.max_file_bytes is not None:
             content_bytes = len(content.encode("utf-8"))
-            if content_bytes > config.max_file_bytes:
-                raise FileTooLargeError(path, content_bytes, config.max_file_bytes)
+            if content_bytes > mount.max_file_bytes:
+                raise FileTooLargeError(path, content_bytes, mount.max_file_bytes)
 
         # Create parent directories if needed
         resolved.parent.mkdir(parents=True, exist_ok=True)
 
         resolved.write_text(content, encoding="utf-8")
 
-        # Get sandbox root for relative path calculation
-        sandbox_root = self._sandbox.resolve(name)
+        # Get mount root for relative path calculation
+        mount_root = self._sandbox.resolve(mount_point)
         try:
-            rel_path = resolved.relative_to(sandbox_root)
+            rel_path = resolved.relative_to(mount_root)
         except ValueError:
             rel_path = resolved.name
 
-        display_path = self._format_result_path(name, rel_path)
+        display_path = self._format_result_path(mount_point, rel_path)
         return f"Written {len(content)} characters to {display_path}"
 
     def edit(self, path: str, old_text: str, new_text: str) -> str:
@@ -255,7 +259,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         The old_text must appear exactly once in the file.
 
         Args:
-            path: Path to file (relative to sandbox)
+            path: Virtual path to file (e.g., "/output/file.txt")
             old_text: Exact text to find and replace
             new_text: Text to replace it with
 
@@ -269,12 +273,12 @@ class FileSystemToolset(AbstractToolset[Any]):
             EditError: If old_text not found or found multiple times
             FileNotFoundError: If file doesn't exist
         """
-        name, resolved, config = self._sandbox.get_path_config(path)
+        mount_point, resolved, mount = self._sandbox.get_path_config(path)
 
-        if config.mode != "rw":
+        if mount.mode != "rw":
             raise PathNotWritableError(path, self._sandbox.writable_roots)
 
-        self._sandbox.check_suffix(resolved, config)
+        self._sandbox.check_suffix(resolved, mount)
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -296,60 +300,66 @@ class FileSystemToolset(AbstractToolset[Any]):
         new_content = content.replace(old_text, new_text, 1)
 
         # Check content size against limit
-        if config.max_file_bytes is not None:
+        if mount.max_file_bytes is not None:
             content_bytes = len(new_content.encode("utf-8"))
-            if content_bytes > config.max_file_bytes:
-                raise FileTooLargeError(path, content_bytes, config.max_file_bytes)
+            if content_bytes > mount.max_file_bytes:
+                raise FileTooLargeError(path, content_bytes, mount.max_file_bytes)
 
         resolved.write_text(new_content, encoding="utf-8")
 
-        # Get sandbox root for relative path calculation
-        sandbox_root = self._sandbox.resolve(name)
+        # Get mount root for relative path calculation
+        mount_root = self._sandbox.resolve(mount_point)
         try:
-            rel_path = resolved.relative_to(sandbox_root)
+            rel_path = resolved.relative_to(mount_root)
         except ValueError:
             rel_path = resolved.name
 
-        display_path = self._format_result_path(name, rel_path)
+        display_path = self._format_result_path(mount_point, rel_path)
         return f"Edited {display_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
 
-    def list_files(self, path: str = ".", pattern: str = "**/*") -> list[str]:
+    def list_files(self, path: str = "/", pattern: str = "**/*") -> list[str]:
         """List files matching pattern within sandbox.
 
         Args:
-            path: Base path to search from (sandbox name or sandbox_name/subdir)
+            path: Virtual path to search from (e.g., "/", "/docs", "/docs/sub")
             pattern: Glob pattern to match
 
         Returns:
-            List of matching file paths (as sandbox_name/relative format)
+            List of matching file paths (as /mount/relative format)
         """
-        # If path is "." or empty, list all sandboxes
-        if path in (".", ""):
+        # If path is "/" or "." or empty, list all mounts
+        if path in ("/", ".", ""):
             results = []
-            for name in self._sandbox.readable_roots:
-                root_path = self._sandbox.resolve(name)
+            for mount_point in self._sandbox.readable_roots:
+                root_path = self._sandbox.resolve(mount_point)
 
                 for match in root_path.glob(pattern):
                     if match.is_file():
                         try:
                             rel = match.relative_to(root_path)
-                            results.append(self._format_result_path(name, rel))
+                            result_path = self._format_result_path(mount_point, rel)
+                            # Filter by read permission (respects derived sandbox allowlists)
+                            if self._sandbox.can_read(result_path):
+                                results.append(result_path)
                         except ValueError:
                             continue
             return sorted(results)
 
-        # Get the resolved path and sandbox name
-        name, resolved, _ = self._sandbox.get_path_config(path)
+        # Get the resolved path and mount point
+        mount_point, resolved, _ = self._sandbox.get_path_config(path)
 
-        # Get root for this sandbox
-        root = self._sandbox.resolve(name)
+        # Get root for this mount
+        root = self._sandbox.resolve(mount_point)
 
         results = []
         for match in resolved.glob(pattern):
             if match.is_file():
                 try:
                     rel = match.relative_to(root)
-                    results.append(self._format_result_path(name, rel))
+                    result_path = self._format_result_path(mount_point, rel)
+                    # Filter by read permission (respects derived sandbox allowlists)
+                    if self._sandbox.can_read(result_path):
+                        results.append(result_path)
                 except ValueError:
                     continue
         return sorted(results)
@@ -358,7 +368,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         """Delete a file from the sandbox.
 
         Args:
-            path: Path to file (relative to sandbox)
+            path: Virtual path to file (e.g., "/output/file.txt")
 
         Returns:
             Confirmation message
@@ -368,9 +378,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             PathNotWritableError: If path is read-only
             FileNotFoundError: If file doesn't exist
         """
-        name, resolved, config = self._sandbox.get_path_config(path)
+        mount_point, resolved, mount = self._sandbox.get_path_config(path)
 
-        if config.mode != "rw":
+        if mount.mode != "rw":
             raise PathNotWritableError(path, self._sandbox.writable_roots)
 
         if not resolved.exists():
@@ -381,14 +391,14 @@ class FileSystemToolset(AbstractToolset[Any]):
 
         resolved.unlink()
 
-        # Get sandbox root for relative path calculation
-        sandbox_root = self._sandbox.resolve(name)
+        # Get mount root for relative path calculation
+        mount_root = self._sandbox.resolve(mount_point)
         try:
-            rel_path = resolved.relative_to(sandbox_root)
+            rel_path = resolved.relative_to(mount_root)
         except ValueError:
             rel_path = resolved.name
 
-        display_path = self._format_result_path(name, rel_path)
+        display_path = self._format_result_path(mount_point, rel_path)
         return f"Deleted {display_path}"
 
     def move(self, source: str, destination: str) -> str:
@@ -397,8 +407,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         Parent directories of destination are created automatically.
 
         Args:
-            source: Source path (relative to sandbox)
-            destination: Destination path (relative to sandbox)
+            source: Source virtual path (e.g., "/output/old.txt")
+            destination: Destination virtual path (e.g., "/output/new.txt")
 
         Returns:
             Confirmation message
@@ -410,9 +420,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileExistsError: If destination already exists
         """
         # Check source
-        src_name, src_resolved, src_config = self._sandbox.get_path_config(source)
+        src_mount, src_resolved, src_mount_cfg = self._sandbox.get_path_config(source)
 
-        if src_config.mode != "rw":
+        if src_mount_cfg.mode != "rw":
             raise PathNotWritableError(source, self._sandbox.writable_roots)
 
         if not src_resolved.exists():
@@ -421,18 +431,18 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not src_resolved.is_file():
             raise IsADirectoryError(f"Cannot move directory: {source}")
 
-        self._sandbox.check_suffix(src_resolved, src_config)
+        self._sandbox.check_suffix(src_resolved, src_mount_cfg)
 
         # Check destination
-        dst_name, dst_resolved, dst_config = self._sandbox.get_path_config(destination)
+        dst_mount, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(destination)
 
-        if dst_config.mode != "rw":
+        if dst_mount_cfg.mode != "rw":
             raise PathNotWritableError(destination, self._sandbox.writable_roots)
 
         if dst_resolved.exists():
             raise FileExistsError(f"Destination already exists: {destination}")
 
-        self._sandbox.check_suffix(dst_resolved, dst_config)
+        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg)
 
         # Create parent directories if needed
         dst_resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -440,8 +450,20 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Move the file
         src_resolved.rename(dst_resolved)
 
-        src_display = self._format_result_path(src_name, src_resolved.name)
-        dst_display = self._format_result_path(dst_name, dst_resolved.name)
+        # Compute relative paths from mount roots for display
+        src_root = self._sandbox.resolve(src_mount)
+        dst_root = self._sandbox.resolve(dst_mount)
+        try:
+            src_rel = src_resolved.relative_to(src_root)
+        except ValueError:
+            src_rel = src_resolved.name
+        try:
+            dst_rel = dst_resolved.relative_to(dst_root)
+        except ValueError:
+            dst_rel = dst_resolved.name
+
+        src_display = self._format_result_path(src_mount, src_rel)
+        dst_display = self._format_result_path(dst_mount, dst_rel)
         return f"Moved {src_display} to {dst_display}"
 
     def copy(self, source: str, destination: str) -> str:
@@ -450,8 +472,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         Parent directories of destination are created automatically.
 
         Args:
-            source: Source path (relative to sandbox)
-            destination: Destination path (relative to sandbox)
+            source: Source virtual path (e.g., "/input/file.txt")
+            destination: Destination virtual path (e.g., "/output/file.txt")
 
         Returns:
             Confirmation message
@@ -465,7 +487,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         import shutil
 
         # Check source (only needs to be readable)
-        src_name, src_resolved, src_config = self._sandbox.get_path_config(source)
+        src_mount, src_resolved, src_mount_cfg = self._sandbox.get_path_config(source)
 
         if not src_resolved.exists():
             raise FileNotFoundError(f"Source file not found: {source}")
@@ -473,25 +495,25 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not src_resolved.is_file():
             raise IsADirectoryError(f"Cannot copy directory: {source}")
 
-        self._sandbox.check_suffix(src_resolved, src_config)
-        self._sandbox.check_size(src_resolved, src_config)
+        self._sandbox.check_suffix(src_resolved, src_mount_cfg)
+        self._sandbox.check_size(src_resolved, src_mount_cfg)
 
         # Check destination
-        dst_name, dst_resolved, dst_config = self._sandbox.get_path_config(destination)
+        dst_mount, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(destination)
 
-        if dst_config.mode != "rw":
+        if dst_mount_cfg.mode != "rw":
             raise PathNotWritableError(destination, self._sandbox.writable_roots)
 
         if dst_resolved.exists():
             raise FileExistsError(f"Destination already exists: {destination}")
 
-        self._sandbox.check_suffix(dst_resolved, dst_config)
+        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg)
 
         # Check size limit on destination
-        if dst_config.max_file_bytes is not None:
+        if dst_mount_cfg.max_file_bytes is not None:
             src_size = src_resolved.stat().st_size
-            if src_size > dst_config.max_file_bytes:
-                raise FileTooLargeError(destination, src_size, dst_config.max_file_bytes)
+            if src_size > dst_mount_cfg.max_file_bytes:
+                raise FileTooLargeError(destination, src_size, dst_mount_cfg.max_file_bytes)
 
         # Create parent directories if needed
         dst_resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -499,8 +521,20 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Copy the file
         shutil.copy2(src_resolved, dst_resolved)
 
-        src_display = self._format_result_path(src_name, src_resolved.name)
-        dst_display = self._format_result_path(dst_name, dst_resolved.name)
+        # Compute relative paths from mount roots for display
+        src_root = self._sandbox.resolve(src_mount)
+        dst_root = self._sandbox.resolve(dst_mount)
+        try:
+            src_rel = src_resolved.relative_to(src_root)
+        except ValueError:
+            src_rel = src_resolved.name
+        try:
+            dst_rel = dst_resolved.relative_to(dst_root)
+        except ValueError:
+            dst_rel = dst_resolved.name
+
+        src_display = self._format_result_path(src_mount, src_rel)
+        dst_display = self._format_result_path(dst_mount, dst_rel)
         return f"Copied {src_display} to {dst_display}"
 
     # ---------------------------------------------------------------------------
@@ -522,7 +556,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
+                    "description": "Virtual path to file (e.g., '/docs/file.txt')",
                 },
                 "max_chars": {
                     "type": "integer",
@@ -543,7 +577,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
+                    "description": "Virtual path to file (e.g., '/output/file.txt')",
                 },
                 "content": {
                     "type": "string",
@@ -558,8 +592,8 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "path": {
                     "type": "string",
-                    "default": ".",
-                    "description": "Path format: 'sandbox_name' or 'sandbox_name/subdir' (default: '.')",
+                    "default": "/",
+                    "description": "Virtual path to list (e.g., '/', '/docs', '/docs/sub'). Default: '/'",
                 },
                 "pattern": {
                     "type": "string",
@@ -574,7 +608,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
+                    "description": "Virtual path to file (e.g., '/output/file.txt')",
                 },
                 "old_text": {
                     "type": "string",
@@ -593,7 +627,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path format: 'sandbox_name/relative/path'",
+                    "description": "Virtual path to file (e.g., '/output/file.txt')",
                 },
             },
             "required": ["path"],
@@ -604,11 +638,11 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "Source path format: 'sandbox_name/relative/path'",
+                    "description": "Source virtual path (e.g., '/output/old.txt')",
                 },
                 "destination": {
                     "type": "string",
-                    "description": "Destination path format: 'sandbox_name/relative/path'",
+                    "description": "Destination virtual path (e.g., '/output/new.txt')",
                 },
             },
             "required": ["source", "destination"],
@@ -619,11 +653,11 @@ class FileSystemToolset(AbstractToolset[Any]):
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "Source path format: 'sandbox_name/relative/path'",
+                    "description": "Source virtual path (e.g., '/input/file.txt')",
                 },
                 "destination": {
                     "type": "string",
-                    "description": "Destination path format: 'sandbox_name/relative/path'",
+                    "description": "Destination virtual path (e.g., '/output/file.txt')",
                 },
             },
             "required": ["source", "destination"],
@@ -636,7 +670,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 name="read_file",
                 description=(
                     "Read a text file from the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'. "
+                    "Path format: '/mount/path' (e.g., '/docs/file.txt'). "
                     "Do not use this on binary files (PDFs, images, etc) - "
                     "pass them as attachments instead."
                 ),
@@ -653,7 +687,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 description=(
                     "Write a text file to the sandbox. "
                     "Parent directories are created automatically. "
-                    "Path format: 'sandbox_name/relative/path'."
+                    "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
                 parameters_json_schema=write_file_schema,
             ),
@@ -667,8 +701,8 @@ class FileSystemToolset(AbstractToolset[Any]):
                 name="list_files",
                 description=(
                     "List files in the sandbox matching a glob pattern. "
-                    "Path format: 'sandbox_name' or 'sandbox_name/subdir'. "
-                    "Use '.' to list all sandboxes."
+                    "Path format: '/mount' or '/mount/subdir'. "
+                    "Use '/' to list all mounts."
                 ),
                 parameters_json_schema=list_files_schema,
             ),
@@ -683,7 +717,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 description=(
                     "Edit a file by replacing exact text. "
                     "The old_text must match exactly and appear only once. "
-                    "Path format: 'sandbox_name/relative/path'."
+                    "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
                 parameters_json_schema=edit_file_schema,
             ),
@@ -697,7 +731,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 name="delete_file",
                 description=(
                     "Delete a file from the sandbox. "
-                    "Path format: 'sandbox_name/relative/path'."
+                    "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
                 parameters_json_schema=delete_file_schema,
             ),
@@ -712,7 +746,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 description=(
                     "Move or rename a file within the sandbox. "
                     "Parent directories of destination are created automatically. "
-                    "Path format: 'sandbox_name/relative/path'."
+                    "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
                 parameters_json_schema=move_file_schema,
             ),
@@ -727,7 +761,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                 description=(
                     "Copy a file within the sandbox. "
                     "Parent directories of destination are created automatically. "
-                    "Path format: 'sandbox_name/relative/path'."
+                    "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
                 parameters_json_schema=copy_file_schema,
             ),
@@ -761,7 +795,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             return self.write(path, content)
 
         elif name == "list_files":
-            path = tool_args.get("path", ".")
+            path = tool_args.get("path", "/")
             pattern = tool_args.get("pattern", "**/*")
             return self.list_files(path, pattern)
 

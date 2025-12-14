@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2025-01-14
+
+### Added
+- New `Mount` model: Docker-style mounts for mapping host directories to virtual paths
+- Unified path format: all paths now use `/mount/path` format (e.g., `/docs/file.txt`)
+- Path normalization: paths without leading `/` are automatically normalized
+- Mount overlap validation: rejects duplicate or nested mount points
+
+### Changed
+- **Breaking**: Path format now always uses `/mount/path` style
+- `SandboxConfig` now accepts `mounts=[Mount(...)]` as the primary configuration method
+- `readable_roots` and `writable_roots` now return mount points (e.g., `["/docs", "/output"]`)
+- Simplified internal architecture: removed dual-mode handling (root mode vs multi-path mode)
+
+### Deprecated
+- `PathConfig` - use `Mount` instead
+- `RootSandboxConfig` - use `Mount(mount_point="/")` instead
+- `SandboxConfig(paths=...)` - use `SandboxConfig(mounts=[...])` instead
+- `SandboxConfig(root=...)` - use `SandboxConfig(mounts=[Mount(mount_point="/")])` instead
+
+### Migration
+```python
+# Old (0.8.0) - multi-path mode
+config = SandboxConfig(paths={
+    "docs": PathConfig(root="./docs", mode="ro"),
+})
+
+# New (0.9.0)
+config = SandboxConfig(mounts=[
+    Mount(host_path="./docs", mount_point="/docs", mode="ro"),
+])
+
+# Old (0.8.0) - root mode
+config = SandboxConfig(root=RootSandboxConfig(root=".", readonly=False))
+
+# New (0.9.0)
+config = SandboxConfig(mounts=[
+    Mount(host_path=".", mount_point="/", mode="rw"),
+])
+```
+
+Note: The deprecated APIs still work via an internal conversion layer that emits `DeprecationWarning`.
+
 ## [0.8.0] - 2025-01-14
 
 ### Added

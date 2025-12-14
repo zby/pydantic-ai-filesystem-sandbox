@@ -18,28 +18,28 @@ Usage (simple):
     toolset = FileSystemToolset.create_default("./data")
     agent = Agent(..., toolsets=[toolset])
 
-Usage (custom sandbox):
+Usage (custom sandbox with mounts):
     from pydantic_ai_filesystem_sandbox import (
-        FileSystemToolset, Sandbox, SandboxConfig, PathConfig
+        FileSystemToolset, Sandbox, SandboxConfig, Mount
     )
 
-    config = SandboxConfig(paths={
-        "input": PathConfig(root="./input", mode="ro"),
-        "output": PathConfig(root="./output", mode="rw"),
-    })
+    config = SandboxConfig(mounts=[
+        Mount(host_path="./input", mount_point="/input", mode="ro"),
+        Mount(host_path="./output", mount_point="/output", mode="rw"),
+    ])
     sandbox = Sandbox(config)
     toolset = FileSystemToolset(sandbox)
     agent = Agent(..., toolsets=[toolset])
 
 Usage (with approval):
     from pydantic_ai_filesystem_sandbox import (
-        ApprovableFileSystemToolset, Sandbox, SandboxConfig, PathConfig
+        ApprovableFileSystemToolset, Sandbox, SandboxConfig, Mount
     )
     from pydantic_ai_blocking_approval import ApprovalToolset
 
-    config = SandboxConfig(paths={
-        "output": PathConfig(root="./output", mode="rw", write_approval=True),
-    })
+    config = SandboxConfig(mounts=[
+        Mount(host_path="./output", mount_point="/output", mode="rw", write_approval=True),
+    ])
     sandbox = Sandbox(config)
     toolset = ApprovableFileSystemToolset(sandbox)
     approved = ApprovalToolset(inner=toolset, approval_callback=my_callback)
@@ -47,10 +47,12 @@ Usage (with approval):
 """
 
 from .sandbox import (
-    # Configuration
+    # Configuration (new API)
+    Mount,
+    SandboxConfig,
+    # Configuration (deprecated, for backwards compatibility)
     PathConfig,
     RootSandboxConfig,
-    SandboxConfig,
     # Sandbox
     Sandbox,
     # Errors
@@ -76,13 +78,15 @@ from .approval_toolset import (
     ApprovableFileSystemToolset,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
-    # Configuration
+    # Configuration (new API)
+    "Mount",
+    "SandboxConfig",
+    # Configuration (deprecated)
     "PathConfig",
     "RootSandboxConfig",
-    "SandboxConfig",
     # Sandbox (security boundary)
     "Sandbox",
     # Toolset (file I/O)

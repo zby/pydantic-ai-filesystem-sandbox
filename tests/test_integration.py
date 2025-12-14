@@ -407,7 +407,7 @@ class TestApprovalToolsetIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "list_files",
-                {"path": "data"},
+                {"path": "/data"},
                 ctx,
                 tool,
             )
@@ -415,7 +415,7 @@ class TestApprovalToolsetIntegration:
 
         # list_files returns pre_approved from needs_approval
         assert not callback_called
-        assert "data/file.txt" in result
+        assert "/data/file.txt" in result
 
 
 class TestApprovalControllerIntegration:

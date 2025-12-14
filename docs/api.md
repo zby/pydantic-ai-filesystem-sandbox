@@ -1,11 +1,12 @@
 # API Reference
 
-- [Configuration](#configuration): [SandboxConfig](#sandboxconfig), [RootSandboxConfig](#rootsandboxconfig), [PathConfig](#pathconfig)
+- [Configuration](#configuration): [SandboxConfig](#sandboxconfig), [Mount](#mount)
 - [Sandbox](#sandbox): [Methods](#methods), [Properties](#properties)
 - [FileSystemToolset](#filesystemtoolset): [Methods](#methods-1)
 - [ApprovableFileSystemToolset](#approvablefilesystemtoolset): [needs_approval](#needs_approval), [get_approval_description](#get_approval_description)
 - [ReadResult](#readresult)
 - [Errors](#errors)
+- [Migration](#migration): [Deprecated APIs](#deprecated-apis)
 
 ---
 
@@ -13,39 +14,41 @@
 
 ### SandboxConfig
 
-Top-level configuration for a sandbox. Requires exactly one of `root` or `paths`.
+Top-level configuration for a sandbox.
 
 ```python
 class SandboxConfig(BaseModel):
-    root: RootSandboxConfig | None = None  # Single-root mode
-    paths: dict[str, PathConfig] | None = None  # Multi-path mode
+    mounts: list[Mount]  # Docker-style directory mounts
 ```
 
-### RootSandboxConfig
+Example:
+```python
+config = SandboxConfig(mounts=[
+    Mount(host_path="./docs", mount_point="/docs", mode="ro"),
+    Mount(host_path="./output", mount_point="/output", mode="rw"),
+])
+```
 
-Configuration for a single-root sandbox where a host directory becomes virtual `/`.
+### Mount
+
+Configuration for mounting a host directory into the virtual filesystem.
 
 ```python
-class RootSandboxConfig(BaseModel):
-    root: Path  # Host directory that becomes virtual '/'
-    readonly: bool = False  # If true, no writes anywhere
+class Mount(BaseModel):
+    host_path: Path  # Host directory to mount
+    mount_point: str  # Virtual path (must start with '/', e.g., "/docs")
+    mode: Literal["ro", "rw"] = "ro"  # Access mode
     suffixes: list[str] | None = None  # Allowed file extensions (None = all)
     max_file_bytes: int | None = None  # Max file size (None = no limit)
-```
-
-### PathConfig
-
-Configuration for a named path in multi-path mode.
-
-```python
-class PathConfig(BaseModel):
-    root: str  # Root directory path
-    mode: Literal["ro", "rw"] = "ro"  # Access mode
-    suffixes: list[str] | None = None  # Allowed file extensions
-    max_file_bytes: int | None = None  # Max file size
     write_approval: bool = True  # Require approval for writes
     read_approval: bool = False  # Require approval for reads
 ```
+
+**Mount point rules:**
+- Must start with `/`
+- Cannot end with `/` (except for root `/`)
+- Mount points cannot overlap (e.g., `/data` and `/data/sub` would conflict)
+- Only one mount can use `/` (root mount)
 
 ---
 
@@ -59,8 +62,8 @@ Security boundary for permission checking and path resolution. Does not perform 
 Sandbox(config: SandboxConfig, base_path: Path | None = None)
 ```
 
-- `config`: Sandbox configuration
-- `base_path`: Base path for resolving relative roots (defaults to `cwd()`)
+- `config`: Sandbox configuration with mounts
+- `base_path`: Base path for resolving relative host paths (defaults to `cwd()`)
 
 ### Methods
 
@@ -117,27 +120,27 @@ Create a restricted child sandbox using allowlists.
 #### get_path_config
 
 ```python
-def get_path_config(self, path: str) -> tuple[str, Path, PathConfig]
+def get_path_config(self, path: str) -> tuple[str, Path, Mount]
 ```
 
-Get sandbox name, resolved path, and config for a path.
+Get mount point, resolved host path, and mount config for a path.
 
 #### check_suffix / check_size
 
 ```python
-def check_suffix(self, path: Path, config: PathConfig) -> None
-def check_size(self, path: Path, config: PathConfig) -> None
+def check_suffix(self, path: Path, mount: Mount) -> None
+def check_size(self, path: Path, mount: Mount) -> None
 ```
 
-Validate file suffix and size against config limits.
+Validate file suffix and size against mount config limits.
 
 - **Raises**: `SuffixNotAllowedError`, `FileTooLargeError`
 
 ### Properties
 
 ```python
-readable_roots: list[str]  # List of readable path roots
-writable_roots: list[str]  # List of writable path roots
+readable_roots: list[str]  # List of readable mount points (e.g., ["/docs", "/data"])
+writable_roots: list[str]  # List of writable mount points (e.g., ["/output"])
 ```
 
 ---
@@ -284,10 +287,10 @@ Check if a tool call requires approval. Called by `ApprovalToolset` before execu
 
 | Tool | Approval Required When |
 |------|----------------------|
-| `read_file` | `read_approval=True` in PathConfig |
-| `write_file` | `write_approval=True` in PathConfig (default) |
-| `edit_file` | `write_approval=True` in PathConfig (default) |
-| `delete_file` | `write_approval=True` in PathConfig (default) |
+| `read_file` | `read_approval=True` in Mount |
+| `write_file` | `write_approval=True` in Mount (default) |
+| `edit_file` | `write_approval=True` in Mount (default) |
+| `delete_file` | `write_approval=True` in Mount (default) |
 | `move_file` | Either source or destination has `write_approval=True` |
 | `copy_file` | Destination has `write_approval=True` |
 | `list_files` | Never (always pre-approved) |
@@ -306,12 +309,12 @@ def get_approval_description(
 Return a human-readable description for the approval prompt. Called by `ApprovalToolset` when `needs_approval()` returns `needs_approval`.
 
 **Returns:** Description string, e.g.:
-- `"Write 150 chars to output/file.txt"`
-- `"Read from config/settings.json"`
-- `"Edit output/data.md: replace 50 chars with 75 chars"`
-- `"Delete output/temp.txt"`
-- `"Move output/old.txt to output/new.txt"`
-- `"Copy input/template.md to output/doc.md"`
+- `"Write 150 chars to /output/file.txt"`
+- `"Read from /config/settings.json"`
+- `"Edit /output/data.md: replace 50 chars with 75 chars"`
+- `"Delete /output/temp.txt"`
+- `"Move /output/old.txt to /output/new.txt"`
+- `"Copy /input/template.md to /output/doc.md"`
 
 ### Example Usage
 
@@ -321,15 +324,15 @@ from pydantic_ai_filesystem_sandbox import (
     ApprovableFileSystemToolset,
     Sandbox,
     SandboxConfig,
-    PathConfig,
+    Mount,
 )
 from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
 
 # Create sandbox with approval enabled for writes
-config = SandboxConfig(paths={
-    "data": PathConfig(root="./data", mode="rw", write_approval=True),
-    "config": PathConfig(root="./config", mode="ro", read_approval=True),
-})
+config = SandboxConfig(mounts=[
+    Mount(host_path="./data", mount_point="/data", mode="rw", write_approval=True),
+    Mount(host_path="./config", mount_point="/config", mode="ro", read_approval=True),
+])
 sandbox = Sandbox(config)
 toolset = ApprovableFileSystemToolset(sandbox)
 
@@ -374,3 +377,55 @@ All errors inherit from `SandboxError` and include LLM-friendly messages with gu
 | `SuffixNotAllowedError` | File extension not in allowed list |
 | `FileTooLargeError` | File exceeds size limit |
 | `EditError` | Edit failed (text not found or not unique) |
+
+---
+
+## Migration
+
+### From 0.8.x to 0.9.0
+
+Version 0.9.0 introduces Docker-style mounts, replacing the previous `PathConfig` and `RootSandboxConfig` APIs.
+
+**Old API (0.8.x):**
+```python
+# Multi-path mode
+config = SandboxConfig(paths={
+    "docs": PathConfig(root="./docs", mode="ro"),
+    "output": PathConfig(root="./output", mode="rw"),
+})
+
+# Root mode
+config = SandboxConfig(root=RootSandboxConfig(root="./project", readonly=False))
+```
+
+**New API (0.9.0):**
+```python
+# Equivalent to multi-path mode
+config = SandboxConfig(mounts=[
+    Mount(host_path="./docs", mount_point="/docs", mode="ro"),
+    Mount(host_path="./output", mount_point="/output", mode="rw"),
+])
+
+# Equivalent to root mode
+config = SandboxConfig(mounts=[
+    Mount(host_path="./project", mount_point="/", mode="rw"),
+])
+```
+
+**Path format changes:**
+- Old: `"docs/file.txt"` or `"/file.txt"` (depending on mode)
+- New: `"/docs/file.txt"` or `"/file.txt"` (unified format)
+- Note: paths without leading `/` are automatically normalized (e.g., `"docs/file.txt"` becomes `"/docs/file.txt"`)
+
+### Deprecated APIs
+
+The following are deprecated and will be removed in a future version:
+
+| Deprecated | Replacement |
+|------------|-------------|
+| `PathConfig` | `Mount` |
+| `RootSandboxConfig` | `Mount(mount_point="/")` |
+| `SandboxConfig(paths=...)` | `SandboxConfig(mounts=[...])` |
+| `SandboxConfig(root=...)` | `SandboxConfig(mounts=[Mount(mount_point="/")])` |
+
+The deprecated APIs still work via an internal conversion layer that emits `DeprecationWarning`.

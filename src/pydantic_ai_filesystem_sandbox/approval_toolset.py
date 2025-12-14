@@ -182,6 +182,19 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         # Unknown tool - require approval
         return ApprovalResult.needs_approval()
 
+    def _make_display_path(self, path: str) -> str:
+        """Convert a path argument to a display-friendly format."""
+        try:
+            sandbox_name, resolved, _ = self._sandbox.get_path_config(path)
+            root = self._sandbox.resolve(sandbox_name)
+            try:
+                rel = resolved.relative_to(root)
+            except ValueError:
+                rel = resolved.name
+            return self._format_result_path(sandbox_name, rel)
+        except PathNotInSandboxError:
+            return path
+
     def get_approval_description(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
     ) -> str:
@@ -198,16 +211,7 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             Description string to show user
         """
         path = tool_args.get("path", "")
-
-        # Get sandbox name for display
-        try:
-            sandbox_name, _, _ = self._sandbox.get_path_config(path)
-            if sandbox_name == "/":
-                display_path = path if path.startswith("/") else f"/{path}"
-            else:
-                display_path = f"{sandbox_name}/{path}"
-        except PathNotInSandboxError:
-            display_path = path
+        display_path = self._make_display_path(path)
 
         if name == "write_file":
             content = tool_args.get("content", "")
@@ -232,31 +236,15 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         elif name == "move_file":
             source = tool_args.get("source", "")
             destination = tool_args.get("destination", "")
-            try:
-                src_name, _, _ = self._sandbox.get_path_config(source)
-                src_display = f"{src_name}/{source.split('/', 1)[-1] if '/' in source else source}"
-            except PathNotInSandboxError:
-                src_display = source
-            try:
-                dst_name, _, _ = self._sandbox.get_path_config(destination)
-                dst_display = f"{dst_name}/{destination.split('/', 1)[-1] if '/' in destination else destination}"
-            except PathNotInSandboxError:
-                dst_display = destination
+            src_display = self._make_display_path(source)
+            dst_display = self._make_display_path(destination)
             return f"Move {src_display} to {dst_display}"
 
         elif name == "copy_file":
             source = tool_args.get("source", "")
             destination = tool_args.get("destination", "")
-            try:
-                src_name, _, _ = self._sandbox.get_path_config(source)
-                src_display = f"{src_name}/{source.split('/', 1)[-1] if '/' in source else source}"
-            except PathNotInSandboxError:
-                src_display = source
-            try:
-                dst_name, _, _ = self._sandbox.get_path_config(destination)
-                dst_display = f"{dst_name}/{destination.split('/', 1)[-1] if '/' in destination else destination}"
-            except PathNotInSandboxError:
-                dst_display = destination
+            src_display = self._make_display_path(source)
+            dst_display = self._make_display_path(destination)
             return f"Copy {src_display} to {dst_display}"
 
         return f"{name}({path})"

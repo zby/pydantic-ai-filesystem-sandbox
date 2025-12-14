@@ -199,10 +199,10 @@ class TestSandboxListFiles:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        files = sandbox.list_files("data")
-        assert "data/a.txt" in files
-        assert "data/b.txt" in files
-        assert "data/sub/c.txt" in files
+        files = sandbox.list_files("/data")
+        assert "/data/a.txt" in files
+        assert "/data/b.txt" in files
+        assert "/data/sub/c.txt" in files
 
     def test_list_files_with_pattern(self, tmp_path):
         """FileSystemToolset.list_files() respects glob pattern."""
@@ -218,9 +218,75 @@ class TestSandboxListFiles:
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
-        files = sandbox.list_files("data", pattern="*.txt")
-        assert "data/a.txt" in files
-        assert "data/b.md" not in files
+        files = sandbox.list_files("/data", pattern="*.txt")
+        assert "/data/a.txt" in files
+        assert "/data/b.md" not in files
+
+    def test_list_files_respects_derived_allowlist(self, tmp_path):
+        """FileSystemToolset.list_files() only returns files within allowlist."""
+        sandbox_root = tmp_path / "data"
+        (sandbox_root / "allowed").mkdir(parents=True)
+        (sandbox_root / "forbidden").mkdir()
+        (sandbox_root / "allowed" / "a.txt").write_text("a")
+        (sandbox_root / "forbidden" / "b.txt").write_text("b")
+        (sandbox_root / "root.txt").write_text("root")
+
+        config = SandboxConfig(
+            paths={
+                "data": PathConfig(root=str(sandbox_root), mode="ro")
+            }
+        )
+        parent_sandbox = Sandbox(config)
+        child_sandbox = parent_sandbox.derive(allow_read="/data/allowed")
+        toolset = FileSystemToolset(child_sandbox)
+
+        # List from "/data" (ancestor of allowed path) - should only return allowed files
+        files = toolset.list_files("/data")
+        assert "/data/allowed/a.txt" in files
+        assert "/data/forbidden/b.txt" not in files
+        assert "/data/root.txt" not in files
+
+
+class TestPathNormalization:
+    """Tests for path normalization - leading slash is optional."""
+
+    def test_paths_with_and_without_leading_slash(self, tmp_path):
+        """Both 'data/file.txt' and '/data/file.txt' should work."""
+        sandbox_root = tmp_path / "data"
+        sandbox_root.mkdir()
+        (sandbox_root / "file.txt").write_text("content")
+
+        config = SandboxConfig(
+            paths={"data": PathConfig(root=str(sandbox_root), mode="rw")}
+        )
+        sandbox = Sandbox(config)
+
+        # Both formats resolve to the same path
+        assert sandbox.resolve("data/file.txt") == sandbox.resolve("/data/file.txt")
+
+        # Both formats work for permission checks
+        assert sandbox.can_read("data/file.txt")
+        assert sandbox.can_read("/data/file.txt")
+        assert sandbox.can_write("data/file.txt")
+        assert sandbox.can_write("/data/file.txt")
+
+    def test_paths_normalization_with_mount_api(self, tmp_path):
+        """Path normalization works with new Mount API too."""
+        from pydantic_ai_filesystem_sandbox import Mount
+
+        sandbox_root = tmp_path / "docs"
+        sandbox_root.mkdir()
+        (sandbox_root / "readme.md").write_text("hello")
+
+        config = SandboxConfig(
+            mounts=[Mount(host_path=sandbox_root, mount_point="/docs", mode="ro")]
+        )
+        sandbox = Sandbox(config)
+
+        # Both formats work
+        assert sandbox.resolve("docs/readme.md") == sandbox.resolve("/docs/readme.md")
+        assert sandbox.can_read("docs/readme.md")
+        assert sandbox.can_read("/docs/readme.md")
 
 
 class TestSandboxPathValidation:
