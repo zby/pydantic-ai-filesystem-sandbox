@@ -15,7 +15,7 @@ When building LLM agents that interact with the filesystem, you need:
 
 - [**Sandbox**](docs/api.md#sandbox) - Security boundary for permission checking and path resolution
 - [**FileSystemToolset**](docs/api.md#filesystemtoolset) - File I/O tools that use Sandbox
-- [**ApprovalToolset**](https://github.com/zby/pydantic-ai-blocking-approval) - Optional wrapper for human-in-the-loop approval
+- [**ApprovalToolset**](docs/api.md#approvablefilesystemtoolset) - Optional wrapper for human-in-the-loop approval
 
 ## Installation
 
