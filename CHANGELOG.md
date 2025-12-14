@@ -2,13 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - Unreleased
+
+### Fixed
+- Binary file handling: `read_file` now raises a clear error for non-UTF-8 files
+- Validation: reject negative `offset` and `max_chars` parameters in `read_file`
+- Security: error messages no longer leak host filesystem paths (use virtual paths)
+- Security: derived sandbox permission checks now properly traverse parent chain
+- Allowlist entries pointing to files now raise an error with suggested parent directory
+
+### Changed
+- **Nested mounts now allowed**: mounts like `/data` and `/data/special` can coexist; the most specific mount wins
+- Simplified internal derive system (consolidated state variables)
+- `check_suffix()` and `check_size()` now accept optional `display_path` parameter
+- Terminology: error messages now use "mount" instead of "sandbox"
+
 ## [0.9.0] - 2025-01-14
 
 ### Added
 - New `Mount` model: Docker-style mounts for mapping host directories to virtual paths
 - Unified path format: all paths now use `/mount/path` format (e.g., `/docs/file.txt`)
 - Path normalization: paths without leading `/` are automatically normalized
-- Mount overlap validation: rejects duplicate or nested mount points
+- Mount validation: rejects duplicate mount points
 
 ### Changed
 - **Breaking**: Path format now always uses `/mount/path` style

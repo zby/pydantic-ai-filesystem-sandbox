@@ -47,8 +47,8 @@ class Mount(BaseModel):
 **Mount point rules:**
 - Must start with `/`
 - Cannot end with `/` (except for root `/`)
-- Mount points cannot overlap (e.g., `/data` and `/data/sub` would conflict)
-- Only one mount can use `/` (root mount)
+- Duplicate mount points are not allowed
+- Nested mounts are allowed (e.g., `/data` and `/data/special`); the most specific mount wins
 
 ---
 
@@ -128,12 +128,13 @@ Get mount point, resolved host path, and mount config for a path.
 #### check_suffix / check_size
 
 ```python
-def check_suffix(self, path: Path, mount: Mount) -> None
-def check_size(self, path: Path, mount: Mount) -> None
+def check_suffix(self, path: Path, mount: Mount, display_path: str | None = None) -> None
+def check_size(self, path: Path, mount: Mount, display_path: str | None = None) -> None
 ```
 
 Validate file suffix and size against mount config limits.
 
+- `display_path`: Virtual path for error messages (defaults to `path` if not provided)
 - **Raises**: `SuffixNotAllowedError`, `FileTooLargeError`
 
 ### Properties
