@@ -3,6 +3,7 @@
 - [Configuration](#configuration): [SandboxConfig](#sandboxconfig), [RootSandboxConfig](#rootsandboxconfig), [PathConfig](#pathconfig)
 - [Sandbox](#sandbox): [Methods](#methods), [Properties](#properties)
 - [FileSystemToolset](#filesystemtoolset): [Methods](#methods-1)
+- [ApprovableFileSystemToolset](#approvablefilesystemtoolset): [needs_approval](#needs_approval), [get_approval_description](#get_approval_description)
 - [ReadResult](#readresult)
 - [Errors](#errors)
 
@@ -236,6 +237,111 @@ List files matching a glob pattern.
 
 ```python
 sandbox: Sandbox  # Access the underlying sandbox
+```
+
+---
+
+## ApprovableFileSystemToolset
+
+Extends `FileSystemToolset` with approval protocol support for use with `ApprovalToolset` from [pydantic-ai-blocking-approval](https://github.com/zby/pydantic-ai-blocking-approval).
+
+### Constructor
+
+```python
+ApprovableFileSystemToolset(
+    sandbox: Sandbox,
+    id: str | None = None,
+    max_retries: int = 1,
+)
+```
+
+Inherits all methods from `FileSystemToolset` plus the approval protocol methods below.
+
+### needs_approval
+
+```python
+def needs_approval(
+    self,
+    name: str,
+    tool_args: dict[str, Any],
+    ctx: RunContext[Any],
+) -> ApprovalResult
+```
+
+Check if a tool call requires approval. Called by `ApprovalToolset` before executing a tool.
+
+**Parameters:**
+- `name`: Tool name (`read_file`, `write_file`, `edit_file`, `delete_file`, `move_file`, `copy_file`, `list_files`)
+- `tool_args`: Arguments passed to the tool
+- `ctx`: PydanticAI run context
+
+**Returns:** `ApprovalResult` with one of three statuses:
+- `ApprovalResult.blocked(reason)` - Operation not allowed (e.g., path outside sandbox)
+- `ApprovalResult.pre_approved()` - No approval needed (e.g., `write_approval=False`)
+- `ApprovalResult.needs_approval()` - User approval required
+
+**Approval logic by tool:**
+
+| Tool | Approval Required When |
+|------|----------------------|
+| `read_file` | `read_approval=True` in PathConfig |
+| `write_file` | `write_approval=True` in PathConfig (default) |
+| `edit_file` | `write_approval=True` in PathConfig (default) |
+| `delete_file` | `write_approval=True` in PathConfig (default) |
+| `move_file` | Either source or destination has `write_approval=True` |
+| `copy_file` | Destination has `write_approval=True` |
+| `list_files` | Never (always pre-approved) |
+
+### get_approval_description
+
+```python
+def get_approval_description(
+    self,
+    name: str,
+    tool_args: dict[str, Any],
+    ctx: RunContext[Any],
+) -> str
+```
+
+Return a human-readable description for the approval prompt. Called by `ApprovalToolset` when `needs_approval()` returns `needs_approval`.
+
+**Returns:** Description string, e.g.:
+- `"Write 150 chars to output/file.txt"`
+- `"Read from config/settings.json"`
+- `"Edit output/data.md: replace 50 chars with 75 chars"`
+- `"Delete output/temp.txt"`
+- `"Move output/old.txt to output/new.txt"`
+- `"Copy input/template.md to output/doc.md"`
+
+### Example Usage
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_filesystem_sandbox import (
+    ApprovableFileSystemToolset,
+    Sandbox,
+    SandboxConfig,
+    PathConfig,
+)
+from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
+
+# Create sandbox with approval enabled for writes
+config = SandboxConfig(paths={
+    "data": PathConfig(root="./data", mode="rw", write_approval=True),
+    "config": PathConfig(root="./config", mode="ro", read_approval=True),
+})
+sandbox = Sandbox(config)
+toolset = ApprovableFileSystemToolset(sandbox)
+
+# Wrap with approval controller
+controller = ApprovalController(mode="interactive")
+approved_toolset = ApprovalToolset(
+    inner=toolset,
+    approval_callback=controller.approval_callback,
+    memory=controller.memory,
+)
+
+agent = Agent("openai:gpt-4", toolsets=[approved_toolset])
 ```
 
 ---

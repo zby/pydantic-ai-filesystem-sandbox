@@ -268,7 +268,7 @@ approved_toolset = ApprovalToolset(
 agent = Agent(..., toolsets=[approved_toolset])
 ```
 
-`ApprovableFileSystemToolset` extends `FileSystemToolset` with `needs_approval()` (returns `ApprovalResult`) and `get_approval_description()` for the approval UI.
+[`ApprovableFileSystemToolset`](docs/api.md#approvablefilesystemtoolset) extends `FileSystemToolset` with `needs_approval()` (returns `ApprovalResult`) and `get_approval_description()` for the approval UI.
 
 ## Using the Sandbox Directly
 
