@@ -116,6 +116,36 @@ config = SandboxConfig(paths={
 })
 ```
 
+### RootSandboxConfig (single root)
+
+You can configure a sandbox as a single virtual `/` rooted at a host directory:
+
+```python
+from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, RootSandboxConfig
+
+config = SandboxConfig(root=RootSandboxConfig(root=".", readonly=False))
+sandbox = Sandbox(config)
+
+sandbox.resolve("/src/main.py")  # -> <cwd>/src/main.py
+```
+
+### Deriving child sandboxes
+
+Use `Sandbox.derive()` to create a restricted child sandbox. By default the child has **no access** unless you explicitly allow paths.
+
+```python
+parent = Sandbox(config)
+
+# Empty child (secure by default)
+child = parent.derive()
+
+# Allow read-only access to a subtree
+reader = parent.derive(allow_read="output/reports")
+
+# Allow read/write access to a subtree
+writer = parent.derive(allow_write="output/reports")
+```
+
 ## Available Tools
 
 The toolset provides seven tools to the agent:

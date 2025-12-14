@@ -10,10 +10,11 @@ For file operations, use FileSystemToolset which wraps a Sandbox.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Any, Literal, Optional, Union
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -46,13 +47,44 @@ class PathConfig(BaseModel):
     )
 
 
+class RootSandboxConfig(BaseModel):
+    """Configuration for a single-root sandbox.
+
+    The host directory defined by `root` becomes the virtual `/`.
+    """
+
+    root: Path = Field(description="Root directory path for virtual '/'")
+    readonly: bool = Field(
+        default=False, description="If true, no writes anywhere in the sandbox"
+    )
+    suffixes: Optional[list[str]] = Field(
+        default=None,
+        description="Allowed file suffixes (e.g., ['.md', '.txt']). None means all allowed.",
+    )
+    max_file_bytes: Optional[int] = Field(
+        default=None, description="Maximum file size in bytes. None means no limit."
+    )
+
+
 class SandboxConfig(BaseModel):
     """Configuration for a sandbox."""
 
-    paths: dict[str, PathConfig] = Field(
-        default_factory=dict,
+    root: Optional[RootSandboxConfig] = Field(
+        default=None,
+        description="Single-root sandbox configuration (virtual '/')",
+    )
+    paths: Optional[dict[str, PathConfig]] = Field(
+        default=None,
         description="Named paths with their configurations",
     )
+
+    @model_validator(mode="after")
+    def _xor_root_paths(self) -> "SandboxConfig":
+        if self.root is None and self.paths is None:
+            raise ValueError("SandboxConfig requires exactly one of 'root' or 'paths'.")
+        if self.root is not None and self.paths is not None:
+            raise ValueError("SandboxConfig cannot set both 'root' and 'paths'.")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +210,12 @@ class Sandbox:
         self,
         config: SandboxConfig,
         base_path: Optional[Path] = None,
+        *,
+        _parent: Optional["Sandbox"] = None,
+        _allowed_read: Optional[list[tuple[str, Path]]] = None,
+        _allowed_write: Optional[list[tuple[str, Path]]] = None,
+        _readable_root_labels: Optional[list[str]] = None,
+        _writable_root_labels: Optional[list[str]] = None,
     ):
         """Initialize the sandbox.
 
@@ -188,17 +226,50 @@ class Sandbox:
         self.config = config
         self._base_path = base_path or Path.cwd()
         self._paths: dict[str, tuple[Path, PathConfig]] = {}
-        self._setup_paths()
+        self._is_root_mode: bool = False
+        self._root_path: Optional[Path] = None
+        self._root_path_config: Optional[PathConfig] = None
+
+        self._parent: Optional[Sandbox] = _parent
+        self._allowed_read: Optional[list[tuple[str, Path]]] = _allowed_read
+        self._allowed_write: Optional[list[tuple[str, Path]]] = _allowed_write
+        self._readable_root_labels: Optional[list[str]] = _readable_root_labels
+        self._writable_root_labels: Optional[list[str]] = _writable_root_labels
+
+        if self._parent is None:
+            self._setup_paths()
 
     def _setup_paths(self) -> None:
         """Resolve and validate configured paths."""
-        for name, path_config in self.config.paths.items():
+        if self.config.root is not None:
+            self._is_root_mode = True
+            root_cfg = self.config.root
+            root_path = Path(root_cfg.root)
+            if not root_path.is_absolute():
+                root_path = (self._base_path / root_path).resolve()
+            else:
+                root_path = root_path.resolve()
+            root_path.mkdir(parents=True, exist_ok=True)
+            mode: Literal["ro", "rw"] = "ro" if root_cfg.readonly else "rw"
+            # Root-mode uses PathConfig defaults for approvals.
+            path_cfg = PathConfig(
+                root=str(root_path),
+                mode=mode,
+                suffixes=root_cfg.suffixes,
+                max_file_bytes=root_cfg.max_file_bytes,
+            )
+            self._root_path = root_path
+            self._root_path_config = path_cfg
+            self._paths["/"] = (root_path, path_cfg)
+            return
+
+        paths = self.config.paths or {}
+        for name, path_config in paths.items():
             root = Path(path_config.root)
             if not root.is_absolute():
                 root = (self._base_path / root).resolve()
             else:
                 root = root.resolve()
-            # Create directory if it doesn't exist
             root.mkdir(parents=True, exist_ok=True)
             self._paths[name] = (root, path_config)
 
@@ -218,10 +289,22 @@ class Sandbox:
         Raises:
             PathNotInSandboxError: If path is outside sandbox boundaries
         """
-        _, resolved, _ = self._find_path_for(path)
+        _, resolved, _ = self.get_path_config(path)
         return resolved
 
-    def _find_path_for(self, path: str) -> tuple[str, Path, PathConfig]:
+    def _find_path_for_boundary(self, path: str) -> tuple[str, Path, PathConfig]:
+        """Resolve a path to its sandbox root without applying allowlists."""
+        if self._parent is not None:
+            return self._parent._find_path_for_boundary(path)
+
+        if self._is_root_mode:
+            if self._root_path is None or self._root_path_config is None:
+                raise RuntimeError("Root sandbox not initialized.")
+            return self._find_root_mode_boundary(path)
+
+        return self._find_multi_path_boundary(path)
+
+    def _find_multi_path_boundary(self, path: str) -> tuple[str, Path, PathConfig]:
         """Find which sandbox path contains the given path.
 
         Args:
@@ -271,6 +354,29 @@ class Sandbox:
 
         raise PathNotInSandboxError(path, self.readable_roots)
 
+    def _find_root_mode_boundary(self, path: str) -> tuple[str, Path, PathConfig]:
+        """Resolve a sandbox path inside a root-mode sandbox."""
+        assert self._root_path is not None
+        assert self._root_path_config is not None
+
+        normalized = path.replace("\\", "/").strip()
+        if not normalized:
+            normalized = "/"
+
+        if normalized.startswith("~") or ":" in normalized:
+            raise PathNotInSandboxError(path, self.readable_roots)
+        if re.match(r"^[A-Za-z]:", normalized):
+            raise PathNotInSandboxError(path, self.readable_roots)
+
+        # Disallow traversal segments entirely in root-mode.
+        parts = Path(normalized.lstrip("/")).parts
+        if ".." in parts:
+            raise PathNotInSandboxError(path, self.readable_roots)
+
+        relative = normalized.lstrip("/")
+        resolved = self._resolve_within(self._root_path, relative)
+        return ("/", resolved, self._root_path_config)
+
     def _resolve_within(self, root: Path, relative: str) -> Path:
         """Resolve a relative path within a root, preventing escapes.
 
@@ -299,34 +405,44 @@ class Sandbox:
     def can_read(self, path: str) -> bool:
         """Check if path is readable within sandbox boundaries."""
         try:
-            self._find_path_for(path)
-            return True
+            name, resolved, _ = self._find_path_for_boundary(path)
         except SandboxError:
             return False
+
+        if self._parent is not None and not self._parent.can_read(path):
+            return False
+
+        return self._is_allowed_for_read(name, resolved)
 
     def can_write(self, path: str) -> bool:
         """Check if path is writable within sandbox boundaries."""
         try:
-            _, _, config = self._find_path_for(path)
-            return config.mode == "rw"
+            name, resolved, config = self._find_path_for_boundary(path)
         except SandboxError:
             return False
+
+        if config.mode != "rw":
+            return False
+        if self._parent is not None and not self._parent.can_write(path):
+            return False
+
+        return self._is_allowed_for_write(name, resolved)
 
     def needs_read_approval(self, path: str) -> bool:
         """Check if reading this path requires approval."""
         try:
-            _, _, config = self._find_path_for(path)
-            return config.read_approval
+            _, _, config = self.get_path_config(path)
         except SandboxError:
             return False
+        return config.read_approval if self.can_read(path) else False
 
     def needs_write_approval(self, path: str) -> bool:
         """Check if writing this path requires approval."""
         try:
-            _, _, config = self._find_path_for(path)
-            return config.write_approval
+            _, _, config = self.get_path_config(path)
         except SandboxError:
             return False
+        return config.write_approval if self.can_write(path) else False
 
     # ---------------------------------------------------------------------------
     # Boundary Info
@@ -335,16 +451,194 @@ class Sandbox:
     @property
     def readable_roots(self) -> list[str]:
         """List of readable path roots (for error messages)."""
-        return list(self._paths.keys())
+        if self._parent is not None:
+            if self._readable_root_labels is None:
+                return self._parent.readable_roots
+            return self._readable_root_labels
+        if self._is_root_mode:
+            return ["/"]
+        return [name for name in self._paths.keys() if name != "/"]
 
     @property
     def writable_roots(self) -> list[str]:
         """List of writable path roots (for error messages)."""
+        if self._parent is not None:
+            if self._writable_root_labels is None:
+                return self._parent.writable_roots
+            return self._writable_root_labels
+        if self._is_root_mode:
+            cfg = self._root_path_config
+            if cfg is None or cfg.mode != "rw":
+                return []
+            return ["/"]
         return [
             name
             for name, (_, config) in self._paths.items()
             if config.mode == "rw"
         ]
+
+    # ---------------------------------------------------------------------------
+    # Derivation
+    # ---------------------------------------------------------------------------
+
+    def derive(
+        self,
+        *,
+        allow_read: str | list[str] | None = None,
+        allow_write: str | list[str] | None = None,
+        readonly: bool | None = None,
+        inherit: bool = False,
+    ) -> "Sandbox":
+        """Derive a child sandbox using allowlists.
+
+        The child keeps the same path namespace as the parent but can only
+        access paths allowed by the provided prefixes. By default (`inherit=False`
+        and no allowlists), the child has no access.
+        """
+        if readonly is False and not self._has_any_writable_area():
+            raise SandboxPermissionEscalationError(
+                "Cannot create child sandbox with readonly=False: parent sandbox is readonly."
+            )
+
+        read_entries = self._normalize_allowlist(allow_read)
+        write_entries = self._normalize_allowlist(allow_write)
+
+        if write_entries is not None and read_entries is None:
+            read_entries = write_entries
+        if read_entries is not None and write_entries is None:
+            write_entries = []
+
+        if read_entries is None and write_entries is None and not inherit:
+            read_entries = []
+            write_entries = []
+
+        allowed_read, readable_labels = self._resolve_allowlist_entries(read_entries)
+        allowed_write, writable_labels = self._resolve_allowlist_entries(write_entries)
+
+        if readonly:
+            allowed_write = []
+            writable_labels = []
+
+        if read_entries is None and inherit:
+            readable_labels = None
+            allowed_read = None
+        if write_entries is None and inherit and not readonly:
+            writable_labels = None
+            allowed_write = None
+
+        return Sandbox(
+            self.config,
+            base_path=self._base_path,
+            _parent=self,
+            _allowed_read=allowed_read,
+            _allowed_write=allowed_write,
+            _readable_root_labels=readable_labels,
+            _writable_root_labels=writable_labels,
+        )
+
+    def _normalize_allowlist(
+        self, value: str | list[str] | None
+    ) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return [value]
+        return list(value)
+
+    def _resolve_allowlist_entries(
+        self, entries: Optional[list[str]]
+    ) -> tuple[Optional[list[tuple[str, Path]]], Optional[list[str]]]:
+        if entries is None:
+            return None, None
+        allowed: list[tuple[str, Path]] = []
+        labels: list[str] = []
+        for entry in entries:
+            name, prefix_path, label = self._resolve_allow_prefix(entry)
+            allowed.append((name, prefix_path))
+            labels.append(label)
+        # Deduplicate labels while preserving order.
+        seen: set[str] = set()
+        unique_labels = [l for l in labels if not (l in seen or seen.add(l))]
+        return allowed, unique_labels
+
+    def _resolve_allow_prefix(self, entry: str) -> tuple[str, Path, str]:
+        if self._is_root_mode:
+            normalized = entry.replace("\\", "/").strip()
+            if not normalized.startswith("/"):
+                raise ValueError(
+                    f"Root-mode allowlist entry must start with '/': {entry!r}"
+                )
+            if ".." in Path(normalized).parts:
+                raise ValueError(
+                    f"Root-mode allowlist entry must not contain '..': {entry!r}"
+                )
+            resolved = self.resolve(normalized)
+            if resolved.exists() and resolved.is_file():
+                resolved = resolved.parent
+            label = normalized.rstrip("/") or "/"
+            return "/", resolved, label
+
+        name, resolved, _ = self.get_path_config(entry)
+        if resolved.exists() and resolved.is_file():
+            resolved = resolved.parent
+        root_path = self._find_multi_path_boundary(name)[1]
+        try:
+            rel = resolved.relative_to(root_path)
+            rel_str = rel.as_posix()
+        except ValueError:
+            rel_str = ""
+        label = name if not rel_str or rel_str == "." else f"{name}/{rel_str}"
+        return name, resolved, label
+
+    def _has_any_writable_area(self) -> bool:
+        if self._parent is not None:
+            return self._parent._has_any_writable_area()
+        if self._is_root_mode:
+            cfg = self._root_path_config
+            return cfg is not None and cfg.mode == "rw"
+        return any(config.mode == "rw" for _, config in self._paths.values())
+
+    def _matches_prefix(self, name: str, path: Path, prefix: tuple[str, Path]) -> bool:
+        prefix_name, prefix_path = prefix
+        if prefix_name != name:
+            return False
+        try:
+            path.relative_to(prefix_path)
+            return True
+        except ValueError:
+            return False
+
+    def _is_allowed_for_any(self, name: str, path: Path) -> bool:
+        if self._allowed_read is None and self._allowed_write is None:
+            return True
+        prefixes: list[tuple[str, Path]] = []
+        if self._allowed_read is not None:
+            prefixes.extend(self._allowed_read)
+        if self._allowed_write is not None:
+            prefixes.extend(self._allowed_write)
+        for prefix in prefixes:
+            prefix_name, prefix_path = prefix
+            if prefix_name != name:
+                continue
+            # Allow descendants and ancestors of the allowed prefix.
+            if self._matches_prefix(name, path, prefix):
+                return True
+            try:
+                prefix_path.relative_to(path)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def _is_allowed_for_read(self, name: str, path: Path) -> bool:
+        if self._allowed_read is None:
+            return True
+        return any(self._matches_prefix(name, path, p) for p in self._allowed_read)
+
+    def _is_allowed_for_write(self, name: str, path: Path) -> bool:
+        if self._allowed_write is None:
+            return True
+        return any(self._matches_prefix(name, path, p) for p in self._allowed_write)
 
     # ---------------------------------------------------------------------------
     # Validation Helpers
@@ -387,4 +681,17 @@ class Sandbox:
         Raises:
             PathNotInSandboxError: If path is not in any sandbox
         """
-        return self._find_path_for(path)
+        if self._parent is not None:
+            name, resolved, config = self._parent.get_path_config(path)
+            if not self._is_allowed_for_any(name, resolved):
+                raise PathNotInSandboxError(path, self.readable_roots)
+            return name, resolved, config
+
+        name, resolved, config = self._find_path_for_boundary(path)
+        return name, resolved, config
+
+
+class SandboxPermissionEscalationError(SandboxError):
+    """Raised when a child sandbox derivation would expand permissions."""
+
+    pass

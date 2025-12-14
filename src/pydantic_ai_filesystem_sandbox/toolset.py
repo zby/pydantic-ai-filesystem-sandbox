@@ -108,6 +108,17 @@ class FileSystemToolset(AbstractToolset[Any]):
         self._toolset_id = id
         self._max_retries = max_retries
 
+    @staticmethod
+    def _format_result_path(name: str, rel: str | Path) -> str:
+        rel_str = rel.as_posix() if isinstance(rel, Path) else str(rel)
+        if name == "/":
+            if not rel_str or rel_str == ".":
+                return "/"
+            return f"/{rel_str.lstrip('/')}"
+        if not rel_str or rel_str == ".":
+            return name
+        return f"{name}/{rel_str}"
+
     @classmethod
     def create_default(
         cls,
@@ -234,7 +245,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         except ValueError:
             rel_path = resolved.name
 
-        return f"Written {len(content)} characters to {name}/{rel_path}"
+        display_path = self._format_result_path(name, rel_path)
+        return f"Written {len(content)} characters to {display_path}"
 
     def edit(self, path: str, old_text: str, new_text: str) -> str:
         """Edit a file by replacing old_text with new_text.
@@ -298,7 +310,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         except ValueError:
             rel_path = resolved.name
 
-        return f"Edited {name}/{rel_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
+        display_path = self._format_result_path(name, rel_path)
+        return f"Edited {display_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
 
     def list_files(self, path: str = ".", pattern: str = "**/*") -> list[str]:
         """List files matching pattern within sandbox.
@@ -320,7 +333,7 @@ class FileSystemToolset(AbstractToolset[Any]):
                     if match.is_file():
                         try:
                             rel = match.relative_to(root_path)
-                            results.append(f"{name}/{rel}")
+                            results.append(self._format_result_path(name, rel))
                         except ValueError:
                             continue
             return sorted(results)
@@ -336,7 +349,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             if match.is_file():
                 try:
                     rel = match.relative_to(root)
-                    results.append(f"{name}/{rel}")
+                    results.append(self._format_result_path(name, rel))
                 except ValueError:
                     continue
         return sorted(results)
@@ -375,7 +388,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         except ValueError:
             rel_path = resolved.name
 
-        return f"Deleted {name}/{rel_path}"
+        display_path = self._format_result_path(name, rel_path)
+        return f"Deleted {display_path}"
 
     def move(self, source: str, destination: str) -> str:
         """Move or rename a file within the sandbox.
@@ -426,7 +440,9 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Move the file
         src_resolved.rename(dst_resolved)
 
-        return f"Moved {src_name}/{src_resolved.name} to {dst_name}/{dst_resolved.name}"
+        src_display = self._format_result_path(src_name, src_resolved.name)
+        dst_display = self._format_result_path(dst_name, dst_resolved.name)
+        return f"Moved {src_display} to {dst_display}"
 
     def copy(self, source: str, destination: str) -> str:
         """Copy a file within the sandbox.
@@ -483,7 +499,9 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Copy the file
         shutil.copy2(src_resolved, dst_resolved)
 
-        return f"Copied {src_name}/{src_resolved.name} to {dst_name}/{dst_resolved.name}"
+        src_display = self._format_result_path(src_name, src_resolved.name)
+        dst_display = self._format_result_path(dst_name, dst_resolved.name)
+        return f"Copied {src_display} to {dst_display}"
 
     # ---------------------------------------------------------------------------
     # AbstractToolset Implementation

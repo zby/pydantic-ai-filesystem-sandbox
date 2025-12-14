@@ -202,7 +202,10 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         # Get sandbox name for display
         try:
             sandbox_name, _, _ = self._sandbox.get_path_config(path)
-            display_path = f"{sandbox_name}/{path}"
+            if sandbox_name == "/":
+                display_path = path if path.startswith("/") else f"/{path}"
+            else:
+                display_path = f"{sandbox_name}/{path}"
         except PathNotInSandboxError:
             display_path = path
 

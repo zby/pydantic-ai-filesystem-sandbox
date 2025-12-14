@@ -49,6 +49,7 @@ Usage (with approval):
 from .sandbox import (
     # Configuration
     PathConfig,
+    RootSandboxConfig,
     SandboxConfig,
     # Sandbox
     Sandbox,
@@ -56,6 +57,7 @@ from .sandbox import (
     SandboxError,
     PathNotInSandboxError,
     PathNotWritableError,
+    SandboxPermissionEscalationError,
     SuffixNotAllowedError,
     FileTooLargeError,
     EditError,
@@ -79,6 +81,7 @@ __version__ = "0.7.0"
 __all__ = [
     # Configuration
     "PathConfig",
+    "RootSandboxConfig",
     "SandboxConfig",
     # Sandbox (security boundary)
     "Sandbox",
@@ -93,6 +96,7 @@ __all__ = [
     "SandboxError",
     "PathNotInSandboxError",
     "PathNotWritableError",
+    "SandboxPermissionEscalationError",
     "SuffixNotAllowedError",
     "FileTooLargeError",
     "EditError",
