@@ -60,10 +60,27 @@ class Mount(BaseModel):
 
     @model_validator(mode="after")
     def _validate_mount_point(self) -> "Mount":
-        if not self.mount_point.startswith("/"):
+        mount_point = self.mount_point.replace("\\", "/").strip()
+        if "\x00" in mount_point:
+            raise ValueError("mount_point must not contain null bytes")
+        if not mount_point:
+            mount_point = "/"
+        if not mount_point.startswith("/"):
             raise ValueError(f"mount_point must start with '/': {self.mount_point!r}")
-        if self.mount_point != "/" and self.mount_point.endswith("/"):
-            raise ValueError(f"mount_point must not end with '/': {self.mount_point!r}")
+        mount_point = re.sub(r"/{2,}", "/", mount_point)
+        mount_point = posixpath.normpath(mount_point)
+        if mount_point in (".", "/."):
+            mount_point = "/"
+        if mount_point != "/" and mount_point.endswith("/"):
+            mount_point = mount_point.rstrip("/")
+        parts = [p for p in mount_point.split("/") if p]
+        if any(p in (".", "..") for p in parts):
+            raise ValueError(
+                f"mount_point must not contain '.' or '..' segments: {self.mount_point!r}"
+            )
+        if not mount_point.startswith("/"):
+            mount_point = "/" + mount_point
+        self.mount_point = mount_point
         return self
 
 
@@ -434,6 +451,10 @@ class Sandbox:
         normalized = path.replace("\\", "/").strip()
         if not normalized:
             return "/"
+        if "\x00" in normalized:
+            raise PathNotInSandboxError(path, self.readable_roots)
+        if normalized in (".", "/."):
+            return "/"
         # Reject dangerous patterns
         if normalized.startswith("~"):
             raise PathNotInSandboxError(path, self.readable_roots)
@@ -443,6 +464,7 @@ class Sandbox:
         # Ensure path starts with /
         if not normalized.startswith("/"):
             normalized = "/" + normalized
+        normalized = re.sub(r"/{2,}", "/", normalized)
         return normalized
 
     def _normalize_virtual_path_for_display(self, path: str) -> str:
@@ -502,7 +524,7 @@ class Sandbox:
 
         raise PathNotInSandboxError(path, self.readable_roots)
 
-    def _resolve_within(self, host_path: Path, relative: str) -> Path:
+    def _resolve_within(self, host_path: Path, relative: str, *, virtual_path: str) -> Path:
         """Resolve a relative path within a host path, preventing escapes.
 
         Args:
@@ -522,7 +544,7 @@ class Sandbox:
         try:
             candidate.relative_to(host_path)
         except ValueError:
-            raise PathNotInSandboxError(relative, self.readable_roots)
+            raise PathNotInSandboxError(virtual_path, self.readable_roots)
         return candidate
 
     def resolve(self, path: str) -> Path:
@@ -584,19 +606,18 @@ class Sandbox:
         else:
             relative = normalized[len(mount_point) :]
 
-        resolved = self._resolve_within(host_path, relative)
+        resolved = self._resolve_within(host_path, relative, virtual_path=path)
 
         if op == "write" and mount.mode != "rw":
             raise PathNotWritableError(path, self.writable_roots)
 
-        # Check allowlists for derived sandboxes
-        if self._parent is not None:
-            if op == "read":
-                if not self._is_allowed_for_read(mount_point, resolved):
-                    raise PathNotInSandboxError(path, self.readable_roots)
-            else:
-                if not self._is_allowed_for_write(mount_point, resolved):
-                    raise PathNotWritableError(path, self.writable_roots)
+        # Check allowlists (for root sandbox, these return True; for derived, they check)
+        if op == "read":
+            if not self._is_allowed_for_read(mount_point, resolved):
+                raise PathNotInSandboxError(path, self.readable_roots)
+        else:
+            if not self._is_allowed_for_write(mount_point, resolved):
+                raise PathNotWritableError(path, self.writable_roots)
 
         return mount_point, resolved, mount
 
@@ -607,42 +628,34 @@ class Sandbox:
     def can_read(self, path: str) -> bool:
         """Check if path is readable within sandbox boundaries."""
         try:
-            mount_point, resolved, _ = self.get_path_config(path, op="read")
+            self.get_path_config(path, op="read")
+            return True
         except SandboxError:
             return False
-
-        if self._parent is not None and not self._parent.can_read(path):
-            return False
-
-        return self._is_allowed_for_read(mount_point, resolved)
 
     def can_write(self, path: str) -> bool:
         """Check if path is writable within sandbox boundaries."""
         try:
-            mount_point, resolved, _ = self.get_path_config(path, op="write")
+            self.get_path_config(path, op="write")
+            return True
         except SandboxError:
             return False
-
-        if self._parent is not None and not self._parent.can_write(path):
-            return False
-
-        return self._is_allowed_for_write(mount_point, resolved)
 
     def needs_read_approval(self, path: str) -> bool:
         """Check if reading this path requires approval."""
         try:
             _, _, mount = self.get_path_config(path, op="read")
+            return mount.read_approval
         except SandboxError:
             return False
-        return mount.read_approval if self.can_read(path) else False
 
     def needs_write_approval(self, path: str) -> bool:
         """Check if writing this path requires approval."""
         try:
             _, _, mount = self.get_path_config(path, op="write")
+            return mount.write_approval
         except SandboxError:
             return False
-        return mount.write_approval if self.can_write(path) else False
 
     # ---------------------------------------------------------------------------
     # Boundary Info
@@ -762,9 +775,10 @@ class Sandbox:
         Raises:
             ValueError: If entry contains '..' or points to a file
         """
-        normalized = self._normalize_path(entry)
-        if ".." in Path(normalized).parts:
+        raw = entry.replace("\\", "/").strip()
+        if ".." in Path(raw).parts:
             raise ValueError(f"Allowlist entry must not contain '..': {entry!r}")
+        normalized = self._normalize_path(entry)
 
         mount_point, resolved, _ = self.get_path_config(normalized, op=op)
         if resolved.exists() and resolved.is_file():

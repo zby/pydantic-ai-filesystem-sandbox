@@ -250,6 +250,23 @@ class TestSandboxListFiles:
         with pytest.raises(PathNotInSandboxError):
             toolset.list_files("/data")
 
+    def test_list_files_root_in_derived_sandbox_lists_allowed_roots(self, tmp_path):
+        """list_files('/') works with derived sandboxes (no mount-point confusion)."""
+        sandbox_root = tmp_path / "data"
+        (sandbox_root / "allowed").mkdir(parents=True)
+        (sandbox_root / "forbidden").mkdir(parents=True)
+        (sandbox_root / "allowed" / "a.txt").write_text("a")
+        (sandbox_root / "forbidden" / "b.txt").write_text("b")
+
+        config = SandboxConfig(paths={"data": PathConfig(root=str(sandbox_root), mode="ro")})
+        parent = Sandbox(config)
+        child = parent.derive(allow_read="/data/allowed")
+        toolset = FileSystemToolset(child)
+
+        files = toolset.list_files("/")
+        assert "/data/allowed/a.txt" in files
+        assert "/data/forbidden/b.txt" not in files
+
 
 class TestPathNormalization:
     """Tests for path normalization - leading slash is optional."""
@@ -291,6 +308,37 @@ class TestPathNormalization:
         assert sandbox.resolve("docs/readme.md") == sandbox.resolve("/docs/readme.md")
         assert sandbox.can_read("docs/readme.md")
         assert sandbox.can_read("/docs/readme.md")
+
+    def test_double_slash_is_normalized(self, tmp_path):
+        """Paths starting with '//' are treated the same as '/...'."""
+        from pydantic_ai_filesystem_sandbox import Mount
+
+        root_dir = tmp_path / "root"
+        special_dir = tmp_path / "special"
+        (root_dir / "special").mkdir(parents=True)
+        special_dir.mkdir()
+        (root_dir / "special" / "file.txt").write_text("from root", encoding="utf-8")
+        (special_dir / "file.txt").write_text("from special", encoding="utf-8")
+
+        config = SandboxConfig(
+            mounts=[
+                Mount(host_path=root_dir, mount_point="/", mode="ro"),
+                Mount(host_path=special_dir, mount_point="/special", mode="ro"),
+            ]
+        )
+        sandbox = Sandbox(config)
+
+        assert sandbox.resolve("//special/file.txt") == (special_dir / "file.txt").resolve()
+
+    def test_list_files_pattern_disallows_dotdot(self, tmp_path):
+        """list_files should reject patterns that can traverse outside the root."""
+        sandbox_root = tmp_path / "data"
+        sandbox_root.mkdir()
+        config = SandboxConfig(paths={"data": PathConfig(root=str(sandbox_root), mode="ro")})
+        toolset = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(ValueError, match="must not contain '\\.\\.'"):
+            toolset.list_files("/data", pattern="../*")
 
 
 class TestNestedMounts:

@@ -197,6 +197,23 @@ class FileSystemToolset(AbstractToolset[Any]):
             return mount_point
         return f"{mount_point}/{rel_str.lstrip('/')}"
 
+    @staticmethod
+    def _validate_glob_pattern(pattern: str) -> str:
+        normalized = pattern.replace("\\", "/").strip()
+        if not normalized:
+            return "**/*"
+        if "\x00" in normalized:
+            raise ValueError("pattern must not contain null bytes")
+        if normalized.startswith(("/", "~")):
+            raise ValueError(
+                "pattern must be relative (must not start with '/' or '~')"
+            )
+        if len(normalized) >= 2 and normalized[1] == ":":
+            raise ValueError("pattern must not be a Windows drive path")
+        if ".." in Path(normalized).parts:
+            raise ValueError("pattern must not contain '..' path segments")
+        return normalized
+
     @classmethod
     def create_default(
         cls,
@@ -356,8 +373,16 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
 
+        self._sandbox.check_size(resolved, mount, virtual_path=path)
+
         # Read current content
-        content = resolved.read_text(encoding="utf-8")
+        try:
+            content = resolved.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise SandboxError(
+                f"Cannot edit '{path}': file appears to be binary or not UTF-8 encoded.\n"
+                "This tool only edits text files. For binary files, pass them as attachments."
+            )
 
         # Count occurrences
         count = content.count(old_text)
@@ -392,22 +417,29 @@ class FileSystemToolset(AbstractToolset[Any]):
         Returns:
             List of matching file paths (as /mount/relative format)
         """
+        pattern = self._validate_glob_pattern(pattern)
+
         # If path is "/" or "." or empty, list all mounts
         if path in ("/", ".", ""):
-            results = []
-            for mount_point in self._sandbox.readable_roots:
-                root_path = self._sandbox.get_mount_root(mount_point)
+            results: set[str] = set()
+            for root_virtual in self._sandbox.readable_roots:
+                mount_point, resolved, _ = self._sandbox.get_path_config(
+                    root_virtual, op="read"
+                )
+                mount_root = self._sandbox.get_mount_root(mount_point)
+                if not resolved.exists():
+                    continue
 
-                for match in root_path.glob(pattern):
-                    if match.is_file():
-                        try:
-                            rel = match.relative_to(root_path)
-                            result_path = self._format_result_path(mount_point, rel)
-                            # Filter by read permission (respects derived sandbox allowlists)
-                            if self._sandbox.can_read(result_path):
-                                results.append(result_path)
-                        except ValueError:
-                            continue
+                for match in resolved.glob(pattern):
+                    if not match.is_file():
+                        continue
+                    try:
+                        rel = match.relative_to(mount_root)
+                    except ValueError:
+                        continue
+                    result_path = self._format_result_path(mount_point, rel)
+                    if self._sandbox.can_read(result_path):
+                        results.add(result_path)
             return sorted(results)
 
         # Get the resolved path and mount point
