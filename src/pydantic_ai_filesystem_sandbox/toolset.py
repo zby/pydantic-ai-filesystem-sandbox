@@ -66,6 +66,79 @@ class ReadResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tool Argument Models
+# ---------------------------------------------------------------------------
+
+
+class ReadFileArgs(BaseModel):
+    """Arguments for read_file tool."""
+
+    path: str = Field(description="Virtual path to file (e.g., '/docs/file.txt')")
+    max_chars: int = Field(
+        default=DEFAULT_MAX_READ_CHARS,
+        description=f"Maximum characters to read (default {DEFAULT_MAX_READ_CHARS:,})",
+    )
+    offset: int = Field(
+        default=0,
+        description="Character position to start reading from (default 0)",
+    )
+
+
+class WriteFileArgs(BaseModel):
+    """Arguments for write_file tool."""
+
+    path: str = Field(description="Virtual path to file (e.g., '/output/file.txt')")
+    content: str = Field(description="Content to write to the file")
+
+
+class ListFilesArgs(BaseModel):
+    """Arguments for list_files tool."""
+
+    path: str = Field(
+        default="/",
+        description="Virtual path to list (e.g., '/', '/docs', '/docs/sub'). Default: '/'",
+    )
+    pattern: str = Field(
+        default="**/*",
+        description="Glob pattern to match (default: '**/*')",
+    )
+
+
+class EditFileArgs(BaseModel):
+    """Arguments for edit_file tool."""
+
+    path: str = Field(description="Virtual path to file (e.g., '/output/file.txt')")
+    old_text: str = Field(
+        description="Exact text to find (must match exactly and be unique)"
+    )
+    new_text: str = Field(description="Text to replace old_text with")
+
+
+class DeleteFileArgs(BaseModel):
+    """Arguments for delete_file tool."""
+
+    path: str = Field(description="Virtual path to file (e.g., '/output/file.txt')")
+
+
+class MoveFileArgs(BaseModel):
+    """Arguments for move_file tool."""
+
+    source: str = Field(description="Source virtual path (e.g., '/output/old.txt')")
+    destination: str = Field(
+        description="Destination virtual path (e.g., '/output/new.txt')"
+    )
+
+
+class CopyFileArgs(BaseModel):
+    """Arguments for copy_file tool."""
+
+    source: str = Field(description="Source virtual path (e.g., '/input/file.txt')")
+    destination: str = Field(
+        description="Destination virtual path (e.g., '/output/file.txt')"
+    )
+
+
+# ---------------------------------------------------------------------------
 # FileSystemToolset Implementation
 # ---------------------------------------------------------------------------
 
@@ -532,120 +605,6 @@ class FileSystemToolset(AbstractToolset[Any]):
         """Return the tools provided by this toolset."""
         tools = {}
 
-        # Define tool schemas
-        read_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Virtual path to file (e.g., '/docs/file.txt')",
-                },
-                "max_chars": {
-                    "type": "integer",
-                    "default": DEFAULT_MAX_READ_CHARS,
-                    "description": f"Maximum characters to read (default {DEFAULT_MAX_READ_CHARS:,})",
-                },
-                "offset": {
-                    "type": "integer",
-                    "default": 0,
-                    "description": "Character position to start reading from (default 0)",
-                },
-            },
-            "required": ["path"],
-        }
-
-        write_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Virtual path to file (e.g., '/output/file.txt')",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write to the file",
-                },
-            },
-            "required": ["path", "content"],
-        }
-
-        list_files_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "default": "/",
-                    "description": "Virtual path to list (e.g., '/', '/docs', '/docs/sub'). Default: '/'",
-                },
-                "pattern": {
-                    "type": "string",
-                    "default": "**/*",
-                    "description": "Glob pattern to match (default: '**/*')",
-                },
-            },
-        }
-
-        edit_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Virtual path to file (e.g., '/output/file.txt')",
-                },
-                "old_text": {
-                    "type": "string",
-                    "description": "Exact text to find (must match exactly and be unique)",
-                },
-                "new_text": {
-                    "type": "string",
-                    "description": "Text to replace old_text with",
-                },
-            },
-            "required": ["path", "old_text", "new_text"],
-        }
-
-        delete_file_schema = {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Virtual path to file (e.g., '/output/file.txt')",
-                },
-            },
-            "required": ["path"],
-        }
-
-        move_file_schema = {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "description": "Source virtual path (e.g., '/output/old.txt')",
-                },
-                "destination": {
-                    "type": "string",
-                    "description": "Destination virtual path (e.g., '/output/new.txt')",
-                },
-            },
-            "required": ["source", "destination"],
-        }
-
-        copy_file_schema = {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "description": "Source virtual path (e.g., '/input/file.txt')",
-                },
-                "destination": {
-                    "type": "string",
-                    "description": "Destination virtual path (e.g., '/output/file.txt')",
-                },
-            },
-            "required": ["source", "destination"],
-        }
-
-        # Create ToolsetTool instances
         tools["read_file"] = ToolsetTool(
             toolset=self,
             tool_def=ToolDefinition(
@@ -656,10 +615,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Do not use this on binary files (PDFs, images, etc) - "
                     "pass them as attachments instead."
                 ),
-                parameters_json_schema=read_file_schema,
+                parameters_json_schema=ReadFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(ReadFileArgs).validator,
         )
 
         tools["write_file"] = ToolsetTool(
@@ -671,10 +630,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Parent directories are created automatically. "
                     "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
-                parameters_json_schema=write_file_schema,
+                parameters_json_schema=WriteFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(WriteFileArgs).validator,
         )
 
         tools["list_files"] = ToolsetTool(
@@ -686,10 +645,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Path format: '/mount' or '/mount/subdir'. "
                     "Use '/' to list all mounts."
                 ),
-                parameters_json_schema=list_files_schema,
+                parameters_json_schema=ListFilesArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(ListFilesArgs).validator,
         )
 
         tools["edit_file"] = ToolsetTool(
@@ -701,10 +660,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "The old_text must match exactly and appear only once. "
                     "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
-                parameters_json_schema=edit_file_schema,
+                parameters_json_schema=EditFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(EditFileArgs).validator,
         )
 
         tools["delete_file"] = ToolsetTool(
@@ -715,10 +674,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Delete a file from the sandbox. "
                     "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
-                parameters_json_schema=delete_file_schema,
+                parameters_json_schema=DeleteFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(DeleteFileArgs).validator,
         )
 
         tools["move_file"] = ToolsetTool(
@@ -730,10 +689,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Parent directories of destination are created automatically. "
                     "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
-                parameters_json_schema=move_file_schema,
+                parameters_json_schema=MoveFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(MoveFileArgs).validator,
         )
 
         tools["copy_file"] = ToolsetTool(
@@ -745,10 +704,10 @@ class FileSystemToolset(AbstractToolset[Any]):
                     "Parent directories of destination are created automatically. "
                     "Path format: '/mount/path' (e.g., '/output/file.txt')."
                 ),
-                parameters_json_schema=copy_file_schema,
+                parameters_json_schema=CopyFileArgs.model_json_schema(),
             ),
             max_retries=self._max_retries,
-            args_validator=TypeAdapter(dict[str, Any]).validator,
+            args_validator=TypeAdapter(CopyFileArgs).validator,
         )
 
         return tools
@@ -756,50 +715,48 @@ class FileSystemToolset(AbstractToolset[Any]):
     async def call_tool(
         self,
         name: str,
-        tool_args: dict[str, Any],
+        tool_args: Any,
         ctx: RunContext[Any],
         tool: ToolsetTool[Any],
     ) -> Any:
         """Call a tool with the given arguments.
 
+        Args:
+            name: Tool name
+            tool_args: Either a validated model instance or a dict (when called via ApprovalToolset)
+            ctx: PydanticAI run context
+            tool: ToolsetTool instance
+
         Note: Approval checking is handled by ApprovalToolset via needs_approval().
         This method just executes the operation.
         """
         if name == "read_file":
-            path = tool_args["path"]
-            max_chars = tool_args.get("max_chars", DEFAULT_MAX_READ_CHARS)
-            offset = tool_args.get("offset", 0)
-            return self.read(path, max_chars=max_chars, offset=offset)
+            args = tool_args if isinstance(tool_args, ReadFileArgs) else ReadFileArgs(**tool_args)
+            return self.read(args.path, max_chars=args.max_chars, offset=args.offset)
 
         elif name == "write_file":
-            path = tool_args["path"]
-            content = tool_args["content"]
-            return self.write(path, content)
+            args = tool_args if isinstance(tool_args, WriteFileArgs) else WriteFileArgs(**tool_args)
+            return self.write(args.path, args.content)
 
         elif name == "list_files":
-            path = tool_args.get("path", "/")
-            pattern = tool_args.get("pattern", "**/*")
-            return self.list_files(path, pattern)
+            args = tool_args if isinstance(tool_args, ListFilesArgs) else ListFilesArgs(**tool_args)
+            return self.list_files(args.path, args.pattern)
 
         elif name == "edit_file":
-            path = tool_args["path"]
-            old_text = tool_args["old_text"]
-            new_text = tool_args["new_text"]
-            return self.edit(path, old_text, new_text)
+            args = tool_args if isinstance(tool_args, EditFileArgs) else EditFileArgs(**tool_args)
+            return self.edit(args.path, args.old_text, args.new_text)
 
         elif name == "delete_file":
-            path = tool_args["path"]
-            return self.delete(path)
+            args = tool_args if isinstance(tool_args, DeleteFileArgs) else DeleteFileArgs(**tool_args)
+            return self.delete(args.path)
 
         elif name == "move_file":
-            source = tool_args["source"]
-            destination = tool_args["destination"]
-            return self.move(source, destination)
+            args = tool_args if isinstance(tool_args, MoveFileArgs) else MoveFileArgs(**tool_args)
+            return self.move(args.source, args.destination)
 
         elif name == "copy_file":
-            source = tool_args["source"]
-            destination = tool_args["destination"]
-            return self.copy(source, destination)
+            args = tool_args if isinstance(tool_args, CopyFileArgs) else CopyFileArgs(**tool_args)
+            return self.copy(args.source, args.destination)
 
         else:
             raise ValueError(f"Unknown tool: {name}")
