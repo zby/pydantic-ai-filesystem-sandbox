@@ -5,14 +5,14 @@ with approval protocol support for use with ApprovalToolset from
 pydantic-ai-blocking-approval.
 
 Example:
-    from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, PathConfig
+    from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, Mount
     from pydantic_ai_filesystem_sandbox.approval_toolset import ApprovableFileSystemToolset
     from pydantic_ai_blocking_approval import ApprovalToolset, ApprovalController
 
     # Create sandbox and toolset
-    config = SandboxConfig(paths={
-        "output": PathConfig(root="./output", mode="rw", write_approval=True),
-    })
+    config = SandboxConfig(mounts=[
+        Mount(host_path="./output", mount_point="/output", mode="rw", write_approval=True),
+    ])
     sandbox = Sandbox(config)
     toolset = ApprovableFileSystemToolset(sandbox)
 
@@ -44,13 +44,13 @@ class ApprovableFileSystemToolset(FileSystemToolset):
     methods for use with ApprovalToolset from pydantic-ai-blocking-approval.
 
     Example:
-        from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, PathConfig
+        from pydantic_ai_filesystem_sandbox import Sandbox, SandboxConfig, Mount
         from pydantic_ai_filesystem_sandbox.approval_toolset import ApprovableFileSystemToolset
         from pydantic_ai_blocking_approval import ApprovalToolset
 
-        sandbox = Sandbox(SandboxConfig(paths={
-            "output": PathConfig(root="./output", mode="rw", write_approval=True),
-        }))
+        sandbox = Sandbox(SandboxConfig(mounts=[
+            Mount(host_path="./output", mount_point="/output", mode="rw", write_approval=True),
+        ]))
         toolset = ApprovableFileSystemToolset(sandbox)
         approved = ApprovalToolset(inner=toolset, approval_callback=my_callback)
     """
@@ -70,13 +70,18 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         Returns:
             ApprovalResult with status: blocked, pre_approved, or needs_approval
         """
+        # Tools that require 'path' argument
+        path_required_tools = {"write_file", "read_file", "edit_file", "delete_file", "list_files"}
+        if name in path_required_tools and "path" not in tool_args:
+            return ApprovalResult.blocked(f"Missing required 'path' argument for {name}")
+
         path = tool_args.get("path", "")
 
         if name == "write_file":
             try:
-                sandbox_name, resolved, config = self._sandbox.get_path_config(path)
+                mount_point, resolved, config = self._sandbox.get_path_config(path)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Path not in any sandbox: {path}")
+                return ApprovalResult.blocked(f"Path not in any mount: {path}")
 
             if config.mode != "rw":
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
@@ -88,9 +93,9 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "read_file":
             try:
-                sandbox_name, resolved, config = self._sandbox.get_path_config(path)
+                mount_point, resolved, config = self._sandbox.get_path_config(path)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Path not in any sandbox: {path}")
+                return ApprovalResult.blocked(f"Path not in any mount: {path}")
 
             if not config.read_approval:
                 return ApprovalResult.pre_approved()
@@ -99,9 +104,9 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "edit_file":
             try:
-                sandbox_name, resolved, config = self._sandbox.get_path_config(path)
+                mount_point, resolved, config = self._sandbox.get_path_config(path)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Path not in any sandbox: {path}")
+                return ApprovalResult.blocked(f"Path not in any mount: {path}")
 
             if config.mode != "rw":
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
@@ -116,9 +121,9 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "delete_file":
             try:
-                sandbox_name, resolved, config = self._sandbox.get_path_config(path)
+                mount_point, resolved, config = self._sandbox.get_path_config(path)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Path not in any sandbox: {path}")
+                return ApprovalResult.blocked(f"Path not in any mount: {path}")
 
             if config.mode != "rw":
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
@@ -129,23 +134,27 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             return ApprovalResult.needs_approval()
 
         elif name == "move_file":
-            source = tool_args.get("source", "")
-            destination = tool_args.get("destination", "")
+            if "source" not in tool_args:
+                return ApprovalResult.blocked("Missing required 'source' argument for move_file")
+            if "destination" not in tool_args:
+                return ApprovalResult.blocked("Missing required 'destination' argument for move_file")
+            source = tool_args["source"]
+            destination = tool_args["destination"]
 
             # Check source
             try:
-                src_name, _, src_config = self._sandbox.get_path_config(source)
+                src_mount, _, src_config = self._sandbox.get_path_config(source)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Source not in any sandbox: {source}")
+                return ApprovalResult.blocked(f"Source not in any mount: {source}")
 
             if src_config.mode != "rw":
                 return ApprovalResult.blocked(f"Source is read-only: {source}")
 
             # Check destination
             try:
-                dst_name, _, dst_config = self._sandbox.get_path_config(destination)
+                dst_mount, _, dst_config = self._sandbox.get_path_config(destination)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Destination not in any sandbox: {destination}")
+                return ApprovalResult.blocked(f"Destination not in any mount: {destination}")
 
             if dst_config.mode != "rw":
                 return ApprovalResult.blocked(f"Destination is read-only: {destination}")
@@ -156,20 +165,24 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             return ApprovalResult.needs_approval()
 
         elif name == "copy_file":
-            source = tool_args.get("source", "")
-            destination = tool_args.get("destination", "")
+            if "source" not in tool_args:
+                return ApprovalResult.blocked("Missing required 'source' argument for copy_file")
+            if "destination" not in tool_args:
+                return ApprovalResult.blocked("Missing required 'destination' argument for copy_file")
+            source = tool_args["source"]
+            destination = tool_args["destination"]
 
             # Check source (only needs read)
             try:
-                src_name, _, src_config = self._sandbox.get_path_config(source)
+                src_mount, _, src_config = self._sandbox.get_path_config(source)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Source not in any sandbox: {source}")
+                return ApprovalResult.blocked(f"Source not in any mount: {source}")
 
             # Check destination
             try:
-                dst_name, _, dst_config = self._sandbox.get_path_config(destination)
+                dst_mount, _, dst_config = self._sandbox.get_path_config(destination)
             except PathNotInSandboxError:
-                return ApprovalResult.blocked(f"Destination not in any sandbox: {destination}")
+                return ApprovalResult.blocked(f"Destination not in any mount: {destination}")
 
             if dst_config.mode != "rw":
                 return ApprovalResult.blocked(f"Destination is read-only: {destination}")
@@ -185,13 +198,13 @@ class ApprovableFileSystemToolset(FileSystemToolset):
     def _make_display_path(self, path: str) -> str:
         """Convert a path argument to a display-friendly format."""
         try:
-            sandbox_name, resolved, _ = self._sandbox.get_path_config(path)
-            root = self._sandbox.resolve(sandbox_name)
+            mount_point, resolved, _ = self._sandbox.get_path_config(path)
+            root = self._sandbox.resolve(mount_point)
             try:
                 rel = resolved.relative_to(root)
             except ValueError:
                 rel = resolved.name
-            return self._format_result_path(sandbox_name, rel)
+            return self._format_result_path(mount_point, rel)
         except PathNotInSandboxError:
             return path
 

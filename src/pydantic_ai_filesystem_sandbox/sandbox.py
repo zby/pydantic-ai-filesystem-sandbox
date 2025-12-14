@@ -342,10 +342,8 @@ class Sandbox:
         base_path: Optional[Path] = None,
         *,
         _parent: Optional["Sandbox"] = None,
-        _allowed_read: Optional[list[tuple[str, Path]]] = None,
-        _allowed_write: Optional[list[tuple[str, Path]]] = None,
-        _readable_root_labels: Optional[list[str]] = None,
-        _writable_root_labels: Optional[list[str]] = None,
+        _allowed_read: Optional[list[tuple[str, Path, str]]] = None,
+        _allowed_write: Optional[list[tuple[str, Path, str]]] = None,
     ):
         """Initialize the sandbox.
 
@@ -359,10 +357,11 @@ class Sandbox:
         self._mounts: list[tuple[str, Path, Mount]] = []
 
         self._parent: Optional[Sandbox] = _parent
-        self._allowed_read: Optional[list[tuple[str, Path]]] = _allowed_read
-        self._allowed_write: Optional[list[tuple[str, Path]]] = _allowed_write
-        self._readable_root_labels: Optional[list[str]] = _readable_root_labels
-        self._writable_root_labels: Optional[list[str]] = _writable_root_labels
+        # Allowlists: list of (mount_point, host_path, label) tuples
+        # None = inherit from parent (or allow all if root sandbox)
+        # [] = no access
+        self._allowed_read: Optional[list[tuple[str, Path, str]]] = _allowed_read
+        self._allowed_write: Optional[list[tuple[str, Path, str]]] = _allowed_write
 
         if self._parent is None:
             self._setup_mounts()
@@ -374,26 +373,13 @@ class Sandbox:
         """Resolve and validate configured mounts."""
         mounts = self.config.get_mounts()
 
-        # Check for overlapping mount points
+        # Check for duplicate mount points (nested mounts are allowed)
         mount_points = [m.mount_point for m in mounts]
-        for i, mp1 in enumerate(mount_points):
-            for mp2 in mount_points[i + 1 :]:
-                if mp1 == mp2:
-                    raise ValueError(f"Duplicate mount point: {mp1!r}")
-                # Check if one is a prefix of the other
-                if mp1 == "/":
-                    if len(mount_points) > 1:
-                        raise ValueError(
-                            f"Mount at '/' cannot coexist with other mounts: {mp2!r}"
-                        )
-                elif mp2 == "/":
-                    raise ValueError(
-                        f"Mount at '/' cannot coexist with other mounts: {mp1!r}"
-                    )
-                elif mp2.startswith(mp1 + "/") or mp1.startswith(mp2 + "/"):
-                    raise ValueError(
-                        f"Overlapping mount points not allowed: {mp1!r} and {mp2!r}"
-                    )
+        seen = set()
+        for mp in mount_points:
+            if mp in seen:
+                raise ValueError(f"Duplicate mount point: {mp!r}")
+            seen.add(mp)
 
         # Resolve and create mount directories
         for mount in mounts:
@@ -445,11 +431,24 @@ class Sandbox:
 
         normalized = self._normalize_path(path)
 
+        # Find the most specific (longest) matching mount point
+        best_match: tuple[str, Path, Mount] | None = None
+        best_length = -1
+
         for mount_point, host_path, mount in self._mounts:
             if mount_point == "/":
-                return mount_point, host_path, mount
-            if normalized == mount_point or normalized.startswith(mount_point + "/"):
-                return mount_point, host_path, mount
+                # Root mount matches everything, but with lowest priority
+                if best_match is None:
+                    best_match = (mount_point, host_path, mount)
+                    best_length = 0
+            elif normalized == mount_point or normalized.startswith(mount_point + "/"):
+                # More specific mount takes precedence
+                if len(mount_point) > best_length:
+                    best_match = (mount_point, host_path, mount)
+                    best_length = len(mount_point)
+
+        if best_match is not None:
+            return best_match
 
         raise PathNotInSandboxError(path, self.readable_roots)
 
@@ -491,6 +490,26 @@ class Sandbox:
         """
         _, resolved, _ = self.get_path_config(path)
         return resolved
+
+    def get_mount_root(self, mount_point: str) -> Path:
+        """Get the host path for a mount point.
+
+        Unlike resolve(), this doesn't check derived sandbox allowlists.
+        Used internally for path formatting in list_files().
+
+        Args:
+            mount_point: Mount point (e.g., "/data", "/")
+
+        Returns:
+            Host path for the mount
+
+        Raises:
+            PathNotInSandboxError: If mount_point is not a valid mount
+        """
+        for mp, host_path, _ in self._mounts:
+            if mp == mount_point:
+                return host_path
+        raise PathNotInSandboxError(mount_point, self.readable_roots)
 
     def get_path_config(self, path: str) -> tuple[str, Path, Mount]:
         """Get mount point, resolved path, and config for a path.
@@ -576,20 +595,22 @@ class Sandbox:
 
     @property
     def readable_roots(self) -> list[str]:
-        """List of readable mount points (for error messages)."""
+        """List of readable paths (for error messages)."""
         if self._parent is not None:
-            if self._readable_root_labels is None:
+            if self._allowed_read is None:
                 return self._parent.readable_roots
-            return self._readable_root_labels
+            # Extract unique labels from allowlist, preserving order
+            return list(dict.fromkeys(lbl for _, _, lbl in self._allowed_read))
         return [mount_point for mount_point, _, _ in self._mounts]
 
     @property
     def writable_roots(self) -> list[str]:
-        """List of writable mount points (for error messages)."""
+        """List of writable paths (for error messages)."""
         if self._parent is not None:
-            if self._writable_root_labels is None:
+            if self._allowed_write is None:
                 return self._parent.writable_roots
-            return self._writable_root_labels
+            # Extract unique labels from allowlist, preserving order
+            return list(dict.fromkeys(lbl for _, _, lbl in self._allowed_write))
         return [
             mount_point
             for mount_point, _, mount in self._mounts
@@ -628,27 +649,28 @@ class Sandbox:
         read_entries = self._normalize_allowlist(allow_read)
         write_entries = self._normalize_allowlist(allow_write)
 
+        # allow_write implies allow_read for the same paths
         if write_entries is not None and read_entries is None:
             read_entries = write_entries
         if read_entries is not None and write_entries is None:
             write_entries = []
 
+        # Default (no inherit, no allowlists) = no access
         if read_entries is None and write_entries is None and not inherit:
             read_entries = []
             write_entries = []
 
-        allowed_read, readable_labels = self._resolve_allowlist_entries(read_entries)
-        allowed_write, writable_labels = self._resolve_allowlist_entries(write_entries)
+        # Resolve entries to (mount_point, host_path, label) tuples
+        allowed_read = self._resolve_allowlist_entries(read_entries)
+        allowed_write = self._resolve_allowlist_entries(write_entries)
 
         if readonly:
             allowed_write = []
-            writable_labels = []
 
+        # inherit=True with no explicit allowlist = None (inherit from parent)
         if read_entries is None and inherit:
-            readable_labels = None
             allowed_read = None
         if write_entries is None and inherit and not readonly:
-            writable_labels = None
             allowed_write = None
 
         return Sandbox(
@@ -657,8 +679,6 @@ class Sandbox:
             _parent=self,
             _allowed_read=allowed_read,
             _allowed_write=allowed_write,
-            _readable_root_labels=readable_labels,
-            _writable_root_labels=writable_labels,
         )
 
     def _normalize_allowlist(
@@ -672,29 +692,35 @@ class Sandbox:
 
     def _resolve_allowlist_entries(
         self, entries: Optional[list[str]]
-    ) -> tuple[Optional[list[tuple[str, Path]]], Optional[list[str]]]:
+    ) -> Optional[list[tuple[str, Path, str]]]:
+        """Resolve allowlist entries to (mount_point, host_path, label) tuples."""
         if entries is None:
-            return None, None
-        allowed: list[tuple[str, Path]] = []
-        labels: list[str] = []
-        for entry in entries:
-            mount_point, prefix_path, label = self._resolve_allow_prefix(entry)
-            allowed.append((mount_point, prefix_path))
-            labels.append(label)
-        # Deduplicate labels while preserving order.
-        seen: set[str] = set()
-        unique_labels = [lbl for lbl in labels if not (lbl in seen or seen.add(lbl))]
-        return allowed, unique_labels
+            return None
+        return [self._resolve_allow_prefix(entry) for entry in entries]
 
     def _resolve_allow_prefix(self, entry: str) -> tuple[str, Path, str]:
-        """Resolve an allowlist entry to (mount_point, host_path, label)."""
+        """Resolve an allowlist entry to (mount_point, host_path, label).
+
+        Args:
+            entry: A virtual path to allow (must be a directory, not a file)
+
+        Raises:
+            ValueError: If entry contains '..' or points to a file
+        """
         normalized = self._normalize_path(entry)
         if ".." in Path(normalized).parts:
             raise ValueError(f"Allowlist entry must not contain '..': {entry!r}")
 
         resolved = self.resolve(normalized)
         if resolved.exists() and resolved.is_file():
-            resolved = resolved.parent
+            # Suggest the normalized parent path
+            parent_path = str(Path(normalized).parent)
+            if parent_path == ".":
+                parent_path = "/"
+            raise ValueError(
+                f"Allowlist entry must be a directory, not a file: {entry!r}. "
+                f"Use the parent directory instead: '{parent_path}'"
+            )
 
         mount_point, _, _ = self._find_mount(entry)
         label = normalized.rstrip("/") or "/"
@@ -706,9 +732,10 @@ class Sandbox:
         return any(mount.mode == "rw" for _, _, mount in self._mounts)
 
     def _matches_prefix(
-        self, mount_point: str, path: Path, prefix: tuple[str, Path]
+        self, mount_point: str, path: Path, prefix: tuple[str, Path, str]
     ) -> bool:
-        prefix_mount, prefix_path = prefix
+        """Check if path matches an allowlist prefix entry."""
+        prefix_mount, prefix_path, _ = prefix  # Ignore label
         if prefix_mount != mount_point:
             return False
         try:
@@ -718,37 +745,41 @@ class Sandbox:
             return False
 
     def _is_allowed_for_any(self, mount_point: str, path: Path) -> bool:
+        """Check if path is allowed by any read or write allowlist entry.
+
+        Only allows paths that are descendants of (or equal to) an allowed prefix.
+        When inheriting (allowlists are None), delegates to parent.
+        """
         if self._allowed_read is None and self._allowed_write is None:
-            return True
-        prefixes: list[tuple[str, Path]] = []
+            # Inheriting from parent - check parent's permissions
+            if self._parent is not None:
+                return self._parent._is_allowed_for_any(mount_point, path)
+            return True  # Root sandbox with no restrictions
+        prefixes: list[tuple[str, Path, str]] = []
         if self._allowed_read is not None:
             prefixes.extend(self._allowed_read)
         if self._allowed_write is not None:
             prefixes.extend(self._allowed_write)
-        for prefix in prefixes:
-            prefix_mount, prefix_path = prefix
-            if prefix_mount != mount_point:
-                continue
-            # Allow descendants and ancestors of the allowed prefix.
-            if self._matches_prefix(mount_point, path, prefix):
-                return True
-            try:
-                prefix_path.relative_to(path)
-                return True
-            except ValueError:
-                continue
-        return False
+        return any(
+            self._matches_prefix(mount_point, path, prefix) for prefix in prefixes
+        )
 
     def _is_allowed_for_read(self, mount_point: str, path: Path) -> bool:
         if self._allowed_read is None:
-            return True
+            # Inheriting from parent - check parent's permissions
+            if self._parent is not None:
+                return self._parent._is_allowed_for_read(mount_point, path)
+            return True  # Root sandbox with no restrictions
         return any(
             self._matches_prefix(mount_point, path, p) for p in self._allowed_read
         )
 
     def _is_allowed_for_write(self, mount_point: str, path: Path) -> bool:
         if self._allowed_write is None:
-            return True
+            # Inheriting from parent - check parent's permissions
+            if self._parent is not None:
+                return self._parent._is_allowed_for_write(mount_point, path)
+            return True  # Root sandbox with no restrictions
         return any(
             self._matches_prefix(mount_point, path, p) for p in self._allowed_write
         )
@@ -757,8 +788,15 @@ class Sandbox:
     # Validation Helpers
     # ---------------------------------------------------------------------------
 
-    def check_suffix(self, path: Path, mount: Mount) -> None:
+    def check_suffix(
+        self, path: Path, mount: Mount, display_path: Optional[str] = None
+    ) -> None:
         """Check if file suffix is allowed.
+
+        Args:
+            path: Resolved host path
+            mount: Mount configuration
+            display_path: Virtual path for error messages (defaults to path if not provided)
 
         Raises:
             SuffixNotAllowedError: If suffix is not in allowed list
@@ -767,10 +805,19 @@ class Sandbox:
             suffix = path.suffix.lower()
             allowed = [s.lower() for s in mount.suffixes]
             if suffix not in allowed:
-                raise SuffixNotAllowedError(str(path), suffix, mount.suffixes)
+                raise SuffixNotAllowedError(
+                    display_path or str(path), suffix, mount.suffixes
+                )
 
-    def check_size(self, path: Path, mount: Mount) -> None:
+    def check_size(
+        self, path: Path, mount: Mount, display_path: Optional[str] = None
+    ) -> None:
         """Check if file size is within limit.
+
+        Args:
+            path: Resolved host path
+            mount: Mount configuration
+            display_path: Virtual path for error messages (defaults to path if not provided)
 
         Raises:
             FileTooLargeError: If file exceeds size limit
@@ -778,7 +825,9 @@ class Sandbox:
         if mount.max_file_bytes is not None and path.exists():
             size = path.stat().st_size
             if size > mount.max_file_bytes:
-                raise FileTooLargeError(str(path), size, mount.max_file_bytes)
+                raise FileTooLargeError(
+                    display_path or str(path), size, mount.max_file_bytes
+                )
 
 
 class SandboxPermissionEscalationError(SandboxError):

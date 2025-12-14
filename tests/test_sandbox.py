@@ -225,11 +225,11 @@ class TestSandboxListFiles:
     def test_list_files_respects_derived_allowlist(self, tmp_path):
         """FileSystemToolset.list_files() only returns files within allowlist."""
         sandbox_root = tmp_path / "data"
-        (sandbox_root / "allowed").mkdir(parents=True)
+        (sandbox_root / "allowed" / "sub").mkdir(parents=True)
         (sandbox_root / "forbidden").mkdir()
         (sandbox_root / "allowed" / "a.txt").write_text("a")
-        (sandbox_root / "forbidden" / "b.txt").write_text("b")
-        (sandbox_root / "root.txt").write_text("root")
+        (sandbox_root / "allowed" / "sub" / "b.txt").write_text("b")
+        (sandbox_root / "forbidden" / "c.txt").write_text("c")
 
         config = SandboxConfig(
             paths={
@@ -240,11 +240,15 @@ class TestSandboxListFiles:
         child_sandbox = parent_sandbox.derive(allow_read="/data/allowed")
         toolset = FileSystemToolset(child_sandbox)
 
-        # List from "/data" (ancestor of allowed path) - should only return allowed files
-        files = toolset.list_files("/data")
+        # List from allowed path - returns files within allowlist
+        files = toolset.list_files("/data/allowed")
         assert "/data/allowed/a.txt" in files
-        assert "/data/forbidden/b.txt" not in files
-        assert "/data/root.txt" not in files
+        assert "/data/allowed/sub/b.txt" in files
+
+        # Listing from ancestor (outside allowlist) raises error
+        import pytest
+        with pytest.raises(PathNotInSandboxError):
+            toolset.list_files("/data")
 
 
 class TestPathNormalization:
@@ -287,6 +291,67 @@ class TestPathNormalization:
         assert sandbox.resolve("docs/readme.md") == sandbox.resolve("/docs/readme.md")
         assert sandbox.can_read("docs/readme.md")
         assert sandbox.can_read("/docs/readme.md")
+
+
+class TestNestedMounts:
+    """Tests for nested mount support."""
+
+    def test_nested_mounts_most_specific_wins(self, tmp_path):
+        """More specific mount point takes precedence over parent mount."""
+        from pydantic_ai_filesystem_sandbox import Mount
+
+        # Create directories
+        data_root = tmp_path / "data"
+        special_root = tmp_path / "special"
+        data_root.mkdir()
+        special_root.mkdir()
+        (data_root / "file.txt").write_text("from data")
+        (special_root / "file.txt").write_text("from special")
+
+        config = SandboxConfig(
+            mounts=[
+                Mount(host_path=data_root, mount_point="/data", mode="ro"),
+                Mount(host_path=special_root, mount_point="/data/special", mode="rw"),
+            ]
+        )
+        sandbox = Sandbox(config)
+
+        # /data/file.txt comes from data_root
+        assert sandbox.resolve("/data/file.txt") == data_root / "file.txt"
+        assert sandbox.can_read("/data/file.txt")
+        assert not sandbox.can_write("/data/file.txt")  # ro mount
+
+        # /data/special/file.txt comes from special_root (more specific mount)
+        assert sandbox.resolve("/data/special/file.txt") == special_root / "file.txt"
+        assert sandbox.can_read("/data/special/file.txt")
+        assert sandbox.can_write("/data/special/file.txt")  # rw mount
+
+    def test_root_mount_with_specific_override(self, tmp_path):
+        """Root mount can coexist with more specific mounts."""
+        from pydantic_ai_filesystem_sandbox import Mount
+
+        root_dir = tmp_path / "root"
+        special_dir = tmp_path / "special"
+        root_dir.mkdir()
+        special_dir.mkdir()
+        (root_dir / "file.txt").write_text("from root")
+        (special_dir / "file.txt").write_text("from special")
+
+        config = SandboxConfig(
+            mounts=[
+                Mount(host_path=root_dir, mount_point="/", mode="ro"),
+                Mount(host_path=special_dir, mount_point="/special", mode="rw"),
+            ]
+        )
+        sandbox = Sandbox(config)
+
+        # /file.txt comes from root mount
+        assert sandbox.resolve("/file.txt") == root_dir / "file.txt"
+        assert not sandbox.can_write("/file.txt")  # ro
+
+        # /special/file.txt comes from special mount
+        assert sandbox.resolve("/special/file.txt") == special_dir / "file.txt"
+        assert sandbox.can_write("/special/file.txt")  # rw
 
 
 class TestSandboxPathValidation:

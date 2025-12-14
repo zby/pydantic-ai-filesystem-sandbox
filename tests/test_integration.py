@@ -522,7 +522,7 @@ class TestFileSandboxPathValidation:
         result = sandbox.needs_approval("write_file", {"path": "unknown/file.txt"}, ctx)
 
         assert result.is_blocked
-        assert "not in any sandbox" in result.block_reason
+        assert "not in any mount" in result.block_reason
 
     def test_readonly_path_blocked(self, tmp_path):
         """Test that writes to readonly paths return blocked ApprovalResult."""
