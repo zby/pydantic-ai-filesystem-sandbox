@@ -19,17 +19,17 @@ This package separates concerns into two layers:
 - **FileSystemToolset** - File I/O tools that use Sandbox
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  Application Layer                       │
-│                                                          │
-│   Sandbox (Policy)              ApprovalToolset         │
-│   ├── path configs              ├── approval callbacks  │
-│   ├── can_read/can_write        └── session memory      │
-│   └── needs_approval()                                  │
-│                                                          │
-│   FileSystemToolset                                      │
-│   └── uses Sandbox                                       │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                                                            │
+│   ApprovalToolset (optional, for human-in-the-loop)        │
+│                                                            │
+│   FileSystemToolset                                        │
+│   └── file I/O tools (read, write, edit, delete, etc.)     │
+│                                                            │
+│   Sandbox                                                  │
+│   └── policy: permissions, boundaries, path resolution     │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## Installation
