@@ -373,8 +373,52 @@ class TestApprovalToolsetIntegration:
         assert approval_requests[0].tool_name == "write_file"
         assert (sandbox_root / "test.txt").read_text() == "test"
 
-    def test_list_files_never_needs_approval(self, tmp_path):
-        """Test that list_files never requires approval even with read_approval=True."""
+    def test_list_files_requires_approval_when_enabled(self, tmp_path):
+        """Test that list_files requires approval when read_approval=True."""
+        approval_requests: list[ApprovalRequest] = []
+
+        def deny_callback(request: ApprovalRequest) -> ApprovalDecision:
+            approval_requests.append(request)
+            return ApprovalDecision(approved=False, note="User denied list")
+
+        sandbox_root = tmp_path / "data"
+        sandbox_root.mkdir()
+        (sandbox_root / "file.txt").write_text("content")
+
+        config = SandboxConfig(
+            paths={
+                "data": PathConfig(
+                    root=str(sandbox_root),
+                    mode="ro",
+                    read_approval=True,
+                )
+            }
+        )
+        sandbox = ApprovableFileSystemToolset(Sandbox(config))
+        approved_sandbox = ApprovalToolset(
+            inner=sandbox,
+            approval_callback=deny_callback,
+        )
+
+        ctx = MagicMock(spec=RunContext)
+        tool = MagicMock()
+
+        with pytest.raises(PermissionError) as exc_info:
+            asyncio.run(
+                approved_sandbox.call_tool(
+                    "list_files",
+                    {"path": "/data"},
+                    ctx,
+                    tool,
+                )
+            )
+
+        assert len(approval_requests) == 1
+        assert approval_requests[0].tool_name == "list_files"
+        assert "User denied list" in str(exc_info.value)
+
+    def test_list_files_pre_approved_when_disabled(self, tmp_path):
+        """Test that list_files is pre-approved when read_approval=False."""
         callback_called = False
 
         def should_not_be_called(request: ApprovalRequest) -> ApprovalDecision:
@@ -391,7 +435,7 @@ class TestApprovalToolsetIntegration:
                 "data": PathConfig(
                     root=str(sandbox_root),
                     mode="ro",
-                    read_approval=True,
+                    read_approval=False,
                 )
             }
         )
@@ -413,7 +457,6 @@ class TestApprovalToolsetIntegration:
             )
         )
 
-        # list_files returns pre_approved from needs_approval
         assert not callback_called
         assert "/data/file.txt" in result
 
@@ -591,8 +634,8 @@ class TestNeedsApprovalProtocol:
         result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
         assert result.is_needs_approval
 
-    def test_needs_approval_for_list_files_always_pre_approved(self, tmp_path):
-        """Test that list_files never requires approval."""
+    def test_needs_approval_list_files_when_enabled(self, tmp_path):
+        """Test that list_files requires approval when read_approval=True."""
         sandbox_root = tmp_path / "data"
         sandbox_root.mkdir()
 
@@ -609,7 +652,47 @@ class TestNeedsApprovalProtocol:
 
         ctx = MagicMock(spec=RunContext)
         result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
+        assert result.is_needs_approval
+
+    def test_needs_approval_list_files_when_disabled(self, tmp_path):
+        """Test that list_files is pre-approved when read_approval=False."""
+        sandbox_root = tmp_path / "data"
+        sandbox_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "data": PathConfig(
+                    root=str(sandbox_root),
+                    mode="ro",
+                    read_approval=False,
+                )
+            }
+        )
+        sandbox = ApprovableFileSystemToolset(Sandbox(config))
+
+        ctx = MagicMock(spec=RunContext)
+        result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
         assert result.is_pre_approved
+
+    def test_needs_approval_list_files_allows_missing_path(self, tmp_path):
+        """list_files has a default path; missing 'path' should not be blocked."""
+        sandbox_root = tmp_path / "data"
+        sandbox_root.mkdir()
+
+        config = SandboxConfig(
+            paths={
+                "data": PathConfig(
+                    root=str(sandbox_root),
+                    mode="ro",
+                    read_approval=True,
+                )
+            }
+        )
+        sandbox = ApprovableFileSystemToolset(Sandbox(config))
+
+        ctx = MagicMock(spec=RunContext)
+        result = sandbox.needs_approval("list_files", {}, ctx)
+        assert result.is_needs_approval
 
 
 class TestGetApprovalDescription:
@@ -720,5 +803,3 @@ class TestGetApprovalDescription:
         assert "Write" in approval_requests[0].description
         assert "4 chars" in approval_requests[0].description
         assert approval_requests[0].tool_args["path"] == "output/test.txt"
-
-

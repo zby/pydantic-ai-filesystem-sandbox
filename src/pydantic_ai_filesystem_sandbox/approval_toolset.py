@@ -71,11 +71,11 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             ApprovalResult with status: blocked, pre_approved, or needs_approval
         """
         # Tools that require 'path' argument
-        path_required_tools = {"write_file", "read_file", "edit_file", "delete_file", "list_files"}
+        path_required_tools = {"write_file", "read_file", "edit_file", "delete_file"}
         if name in path_required_tools and "path" not in tool_args:
             return ApprovalResult.blocked(f"Missing required 'path' argument for {name}")
 
-        path = tool_args.get("path", "")
+        path = tool_args.get("path", "/")
 
         if name == "write_file":
             try:
@@ -115,6 +115,26 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             return ApprovalResult.needs_approval()
 
         elif name == "list_files":
+            list_path = tool_args.get("path", "/")
+            if list_path in ("/", ".", ""):
+                for root_virtual in self._sandbox.readable_roots:
+                    try:
+                        _, _, config = self._sandbox.get_path_config(
+                            root_virtual, op="read"
+                        )
+                    except PathNotInSandboxError:
+                        continue
+                    if config.read_approval:
+                        return ApprovalResult.needs_approval()
+                return ApprovalResult.pre_approved()
+
+            try:
+                _, _, config = self._sandbox.get_path_config(list_path, op="read")
+            except PathNotInSandboxError:
+                return ApprovalResult.blocked(f"Path not in any mount: {list_path}")
+
+            if config.read_approval:
+                return ApprovalResult.needs_approval()
             return ApprovalResult.pre_approved()
 
         elif name == "delete_file":
@@ -204,7 +224,7 @@ class ApprovableFileSystemToolset(FileSystemToolset):
         Returns:
             Description string to show user
         """
-        path = tool_args.get("path", "")
+        path = tool_args.get("path", "/")
 
         if name == "write_file":
             content = tool_args.get("content", "")
@@ -221,7 +241,7 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "list_files":
             pattern = tool_args.get("pattern", "**/*")
-            return f"List files in {path} matching {pattern}"
+            return f"List file paths in {path} matching {pattern}"
 
         elif name == "delete_file":
             return f"Delete {path}"

@@ -151,6 +151,8 @@ The [toolset](docs/api.md#filesystemtoolset) provides seven tools to the agent:
 
 Read a text file from the sandbox.
 
+Note: `read_file` currently reads the entire file into memory (even when using `max_chars`); use `max_file_bytes` to bound file size.
+
 ```
 Path format: '/mount/path' (e.g., '/docs/file.txt')
 Parameters:
@@ -173,6 +175,8 @@ Parameters:
 ### edit_file
 
 Edit a file by replacing exact text (requires `mode="rw"`).
+
+Note: `edit_file` reads the entire file into memory; use `max_file_bytes` to bound file size.
 
 ```
 Path format: '/mount/path'

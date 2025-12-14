@@ -205,6 +205,8 @@ def read(
 
 Read a text file from the sandbox.
 
+Note: this currently reads the entire file into memory (even when using `max_chars`); use `max_file_bytes` to bound file size.
+
 #### write
 
 ```python
@@ -220,6 +222,8 @@ def edit(self, path: str, old_text: str, new_text: str) -> str
 ```
 
 Edit a file by replacing exact text. `old_text` must match exactly and appear only once.
+
+Note: this currently reads the entire file into memory; use `max_file_bytes` to bound file size.
 
 #### delete
 
@@ -248,7 +252,7 @@ Copy a file. Source can be read-only, destination must be writable.
 #### list_files
 
 ```python
-def list_files(self, path: str = ".", pattern: str = "**/*") -> list[str]
+def list_files(self, path: str = "/", pattern: str = "**/*") -> list[str]
 ```
 
 List files matching a glob pattern.
@@ -310,7 +314,7 @@ Check if a tool call requires approval. Called by `ApprovalToolset` before execu
 | `delete_file` | `write_approval=True` in Mount (default) |
 | `move_file` | Either source or destination has `write_approval=True` |
 | `copy_file` | Destination has `write_approval=True` |
-| `list_files` | Never (always pre-approved) |
+| `list_files` | `read_approval=True` in the Mount(s) being listed |
 
 ### get_approval_description
 
