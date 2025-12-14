@@ -49,6 +49,7 @@ class Mount(BaseModel):
 - Cannot end with `/` (except for root `/`)
 - Duplicate mount points are not allowed
 - Nested mounts are allowed (e.g., `/data` and `/data/special`); the most specific mount wins
+- Mount host paths must not overlap (one mount's host path cannot be inside another)
 
 ---
 
@@ -120,7 +121,7 @@ Create a restricted child sandbox using allowlists.
 #### get_path_config
 
 ```python
-def get_path_config(self, path: str) -> tuple[str, Path, Mount]
+def get_path_config(self, path: str, *, op: Literal["read", "write"]) -> tuple[str, Path, Mount]
 ```
 
 Get mount point, resolved host path, and mount config for a path.
@@ -128,13 +129,28 @@ Get mount point, resolved host path, and mount config for a path.
 #### check_suffix / check_size
 
 ```python
-def check_suffix(self, path: Path, mount: Mount, display_path: str | None = None) -> None
-def check_size(self, path: Path, mount: Mount, display_path: str | None = None) -> None
+def check_suffix(
+    self,
+    path: Path,
+    mount: Mount,
+    *,
+    mount_point: str,
+    virtual_path: str | None = None,
+) -> None
+
+def check_size(
+    self,
+    path: Path,
+    mount: Mount,
+    *,
+    mount_point: str,
+    virtual_path: str | None = None,
+) -> None
 ```
 
 Validate file suffix and size against mount config limits.
 
-- `display_path`: Virtual path for error messages (defaults to `path` if not provided)
+- `virtual_path`: Optional original virtual path for error messages; if omitted, sandbox formats a safe virtual display path
 - **Raises**: `SuffixNotAllowedError`, `FileTooLargeError`
 
 ### Properties

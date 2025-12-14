@@ -19,6 +19,7 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+.uv-cache/
 
 # IDE
 .idea/

@@ -33,7 +33,7 @@ from typing import Any
 from pydantic_ai.tools import RunContext
 from pydantic_ai_blocking_approval import ApprovalResult
 
-from .sandbox import PathNotInSandboxError
+from .sandbox import PathNotInSandboxError, PathNotWritableError
 from .toolset import FileSystemToolset
 
 
@@ -79,11 +79,10 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         if name == "write_file":
             try:
-                mount_point, resolved, config = self._sandbox.get_path_config(path)
+                _, _, config = self._sandbox.get_path_config(path, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Path not in any mount: {path}")
-
-            if config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
 
             if not config.write_approval:
@@ -93,7 +92,7 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "read_file":
             try:
-                mount_point, resolved, config = self._sandbox.get_path_config(path)
+                _, _, config = self._sandbox.get_path_config(path, op="read")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Path not in any mount: {path}")
 
@@ -104,11 +103,10 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "edit_file":
             try:
-                mount_point, resolved, config = self._sandbox.get_path_config(path)
+                _, _, config = self._sandbox.get_path_config(path, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Path not in any mount: {path}")
-
-            if config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
 
             if not config.write_approval:
@@ -121,11 +119,10 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
         elif name == "delete_file":
             try:
-                mount_point, resolved, config = self._sandbox.get_path_config(path)
+                _, _, config = self._sandbox.get_path_config(path, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Path not in any mount: {path}")
-
-            if config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Path is read-only: {path}")
 
             if not config.write_approval:
@@ -143,20 +140,18 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
             # Check source
             try:
-                src_mount, _, src_config = self._sandbox.get_path_config(source)
+                _, _, src_config = self._sandbox.get_path_config(source, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Source not in any mount: {source}")
-
-            if src_config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Source is read-only: {source}")
 
             # Check destination
             try:
-                dst_mount, _, dst_config = self._sandbox.get_path_config(destination)
+                _, _, dst_config = self._sandbox.get_path_config(destination, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Destination not in any mount: {destination}")
-
-            if dst_config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Destination is read-only: {destination}")
 
             if not src_config.write_approval and not dst_config.write_approval:
@@ -174,39 +169,25 @@ class ApprovableFileSystemToolset(FileSystemToolset):
 
             # Check source (only needs read)
             try:
-                src_mount, _, src_config = self._sandbox.get_path_config(source)
+                _, _, src_config = self._sandbox.get_path_config(source, op="read")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Source not in any mount: {source}")
 
             # Check destination
             try:
-                dst_mount, _, dst_config = self._sandbox.get_path_config(destination)
+                _, _, dst_config = self._sandbox.get_path_config(destination, op="write")
             except PathNotInSandboxError:
                 return ApprovalResult.blocked(f"Destination not in any mount: {destination}")
-
-            if dst_config.mode != "rw":
+            except PathNotWritableError:
                 return ApprovalResult.blocked(f"Destination is read-only: {destination}")
 
-            if not dst_config.write_approval:
+            if not src_config.read_approval and not dst_config.write_approval:
                 return ApprovalResult.pre_approved()
 
             return ApprovalResult.needs_approval()
 
         # Unknown tool - require approval
         return ApprovalResult.needs_approval()
-
-    def _make_display_path(self, path: str) -> str:
-        """Convert a path argument to a display-friendly format."""
-        try:
-            mount_point, resolved, _ = self._sandbox.get_path_config(path)
-            root = self._sandbox.resolve(mount_point)
-            try:
-                rel = resolved.relative_to(root)
-            except ValueError:
-                rel = resolved.name
-            return self._format_result_path(mount_point, rel)
-        except PathNotInSandboxError:
-            return path
 
     def get_approval_description(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
@@ -224,40 +205,35 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             Description string to show user
         """
         path = tool_args.get("path", "")
-        display_path = self._make_display_path(path)
 
         if name == "write_file":
             content = tool_args.get("content", "")
             char_count = len(content)
-            return f"Write {char_count} chars to {display_path}"
+            return f"Write {char_count} chars to {path}"
 
         elif name == "read_file":
-            return f"Read from {display_path}"
+            return f"Read from {path}"
 
         elif name == "edit_file":
             old_text = tool_args.get("old_text", "")
             new_text = tool_args.get("new_text", "")
-            return f"Edit {display_path}: replace {len(old_text)} chars with {len(new_text)} chars"
+            return f"Edit {path}: replace {len(old_text)} chars with {len(new_text)} chars"
 
         elif name == "list_files":
             pattern = tool_args.get("pattern", "**/*")
-            return f"List files in {display_path} matching {pattern}"
+            return f"List files in {path} matching {pattern}"
 
         elif name == "delete_file":
-            return f"Delete {display_path}"
+            return f"Delete {path}"
 
         elif name == "move_file":
             source = tool_args.get("source", "")
             destination = tool_args.get("destination", "")
-            src_display = self._make_display_path(source)
-            dst_display = self._make_display_path(destination)
-            return f"Move {src_display} to {dst_display}"
+            return f"Move {source} to {destination}"
 
         elif name == "copy_file":
             source = tool_args.get("source", "")
             destination = tool_args.get("destination", "")
-            src_display = self._make_display_path(source)
-            dst_display = self._make_display_path(destination)
-            return f"Copy {src_display} to {dst_display}"
+            return f"Copy {source} to {destination}"
 
         return f"{name}({path})"

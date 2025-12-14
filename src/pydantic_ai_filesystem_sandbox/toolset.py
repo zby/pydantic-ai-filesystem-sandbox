@@ -197,18 +197,6 @@ class FileSystemToolset(AbstractToolset[Any]):
             return mount_point
         return f"{mount_point}/{rel_str.lstrip('/')}"
 
-    def _get_display_path(self, mount_point: str, resolved: Path) -> str:
-        """Get a display-friendly path from mount point and resolved host path.
-
-        Computes the relative path from mount root and formats it for display.
-        """
-        mount_root = self._sandbox.resolve(mount_point)
-        try:
-            rel_path = resolved.relative_to(mount_root)
-        except ValueError:
-            rel_path = resolved.name
-        return self._format_result_path(mount_point, rel_path)
-
     @classmethod
     def create_default(
         cls,
@@ -268,7 +256,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         if max_chars < 0:
             raise ValueError(f"max_chars must be >= 0, got {max_chars}")
 
-        mount_point, resolved, mount = self._sandbox.get_path_config(path)
+        _, resolved, mount = self._sandbox.get_path_config(path, op="read")
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -276,8 +264,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not resolved.is_file():
             raise IsADirectoryError(f"Not a file: {path}")
 
-        self._sandbox.check_suffix(resolved, mount, path)
-        self._sandbox.check_size(resolved, mount, path)
+        self._sandbox.check_suffix(resolved, mount, virtual_path=path)
+        self._sandbox.check_size(resolved, mount, virtual_path=path)
 
         try:
             text = resolved.read_text(encoding="utf-8")
@@ -322,12 +310,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             PathNotWritableError: If path is read-only
             SuffixNotAllowedError: If suffix not allowed
         """
-        mount_point, resolved, mount = self._sandbox.get_path_config(path)
+        _, resolved, mount = self._sandbox.get_path_config(path, op="write")
 
-        if mount.mode != "rw":
-            raise PathNotWritableError(path, self._sandbox.writable_roots)
-
-        self._sandbox.check_suffix(resolved, mount, path)
+        self._sandbox.check_suffix(resolved, mount, virtual_path=path)
 
         # Check content size against limit
         if mount.max_file_bytes is not None:
@@ -340,8 +325,7 @@ class FileSystemToolset(AbstractToolset[Any]):
 
         resolved.write_text(content, encoding="utf-8")
 
-        display_path = self._get_display_path(mount_point, resolved)
-        return f"Written {len(content)} characters to {display_path}"
+        return f"Written {len(content)} characters to {path}"
 
     def edit(self, path: str, old_text: str, new_text: str) -> str:
         """Edit a file by replacing old_text with new_text.
@@ -365,12 +349,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileNotFoundError: If file doesn't exist
             FileTooLargeError: If edited content exceeds mount's max_file_bytes
         """
-        mount_point, resolved, mount = self._sandbox.get_path_config(path)
+        _, resolved, mount = self._sandbox.get_path_config(path, op="write")
 
-        if mount.mode != "rw":
-            raise PathNotWritableError(path, self._sandbox.writable_roots)
-
-        self._sandbox.check_suffix(resolved, mount, path)
+        self._sandbox.check_suffix(resolved, mount, virtual_path=path)
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -399,8 +380,7 @@ class FileSystemToolset(AbstractToolset[Any]):
 
         resolved.write_text(new_content, encoding="utf-8")
 
-        display_path = self._get_display_path(mount_point, resolved)
-        return f"Edited {display_path}: replaced {len(old_text)} chars with {len(new_text)} chars"
+        return f"Edited {path}: replaced {len(old_text)} chars with {len(new_text)} chars"
 
     def list_files(self, path: str = "/", pattern: str = "**/*") -> list[str]:
         """List files matching pattern within sandbox.
@@ -431,7 +411,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             return sorted(results)
 
         # Get the resolved path and mount point
-        mount_point, resolved, _ = self._sandbox.get_path_config(path)
+        mount_point, resolved, _ = self._sandbox.get_path_config(path, op="read")
 
         # Get mount root for relative path calculation (doesn't check allowlists)
         root = self._sandbox.get_mount_root(mount_point)
@@ -466,10 +446,7 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileNotFoundError: If file doesn't exist
             IsADirectoryError: If path is a directory
         """
-        mount_point, resolved, mount = self._sandbox.get_path_config(path)
-
-        if mount.mode != "rw":
-            raise PathNotWritableError(path, self._sandbox.writable_roots)
+        _, resolved, _ = self._sandbox.get_path_config(path, op="write")
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
@@ -479,8 +456,7 @@ class FileSystemToolset(AbstractToolset[Any]):
 
         resolved.unlink()
 
-        display_path = self._get_display_path(mount_point, resolved)
-        return f"Deleted {display_path}"
+        return f"Deleted {path}"
 
     def move(self, source: str, destination: str) -> str:
         """Move or rename a file within the sandbox.
@@ -501,10 +477,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileExistsError: If destination already exists
         """
         # Check source
-        src_mount, src_resolved, src_mount_cfg = self._sandbox.get_path_config(source)
-
-        if src_mount_cfg.mode != "rw":
-            raise PathNotWritableError(source, self._sandbox.writable_roots)
+        _, src_resolved, src_mount_cfg = self._sandbox.get_path_config(
+            source, op="write"
+        )
 
         if not src_resolved.exists():
             raise FileNotFoundError(f"Source file not found: {source}")
@@ -512,18 +487,17 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not src_resolved.is_file():
             raise IsADirectoryError(f"Cannot move directory: {source}")
 
-        self._sandbox.check_suffix(src_resolved, src_mount_cfg, source)
+        self._sandbox.check_suffix(src_resolved, src_mount_cfg, virtual_path=source)
 
         # Check destination
-        dst_mount, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(destination)
-
-        if dst_mount_cfg.mode != "rw":
-            raise PathNotWritableError(destination, self._sandbox.writable_roots)
+        _, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(
+            destination, op="write"
+        )
 
         if dst_resolved.exists():
             raise FileExistsError(f"Destination already exists: {destination}")
 
-        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg, destination)
+        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg, virtual_path=destination)
 
         # Create parent directories if needed
         dst_resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -531,9 +505,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Move the file
         src_resolved.rename(dst_resolved)
 
-        src_display = self._get_display_path(src_mount, src_resolved)
-        dst_display = self._get_display_path(dst_mount, dst_resolved)
-        return f"Moved {src_display} to {dst_display}"
+        return f"Moved {source} to {destination}"
 
     def copy(self, source: str, destination: str) -> str:
         """Copy a file within the sandbox.
@@ -554,7 +526,9 @@ class FileSystemToolset(AbstractToolset[Any]):
             FileExistsError: If destination already exists
         """
         # Check source (only needs to be readable)
-        src_mount, src_resolved, src_mount_cfg = self._sandbox.get_path_config(source)
+        _, src_resolved, src_mount_cfg = self._sandbox.get_path_config(
+            source, op="read"
+        )
 
         if not src_resolved.exists():
             raise FileNotFoundError(f"Source file not found: {source}")
@@ -562,19 +536,18 @@ class FileSystemToolset(AbstractToolset[Any]):
         if not src_resolved.is_file():
             raise IsADirectoryError(f"Cannot copy directory: {source}")
 
-        self._sandbox.check_suffix(src_resolved, src_mount_cfg, source)
-        self._sandbox.check_size(src_resolved, src_mount_cfg, source)
+        self._sandbox.check_suffix(src_resolved, src_mount_cfg, virtual_path=source)
+        self._sandbox.check_size(src_resolved, src_mount_cfg, virtual_path=source)
 
         # Check destination
-        dst_mount, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(destination)
-
-        if dst_mount_cfg.mode != "rw":
-            raise PathNotWritableError(destination, self._sandbox.writable_roots)
+        _, dst_resolved, dst_mount_cfg = self._sandbox.get_path_config(
+            destination, op="write"
+        )
 
         if dst_resolved.exists():
             raise FileExistsError(f"Destination already exists: {destination}")
 
-        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg, destination)
+        self._sandbox.check_suffix(dst_resolved, dst_mount_cfg, virtual_path=destination)
 
         # Check size limit on destination
         if dst_mount_cfg.max_file_bytes is not None:
@@ -588,9 +561,7 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Copy the file
         shutil.copy2(src_resolved, dst_resolved)
 
-        src_display = self._get_display_path(src_mount, src_resolved)
-        dst_display = self._get_display_path(dst_mount, dst_resolved)
-        return f"Copied {src_display} to {dst_display}"
+        return f"Copied {source} to {destination}"
 
     # ---------------------------------------------------------------------------
     # AbstractToolset Implementation
