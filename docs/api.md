@@ -112,10 +112,10 @@ Create a restricted child sandbox using allowlists.
 
 - `allow_read`: Paths/prefixes the child can read
 - `allow_write`: Paths/prefixes the child can write
-- `readonly`: Force read-only (raises error if parent is readonly and this is False)
+- `readonly`: If True, force the child to be read-only
 - `inherit`: If False (default), child starts with no access; if True, inherits parent access
 
-**Raises**: `SandboxPermissionEscalationError` if attempting to expand permissions.
+**Raises**: `PathNotWritableError` if `allow_write` specifies a path that is read-only in the parent.
 
 #### get_path_config
 
@@ -391,7 +391,6 @@ All errors inherit from `SandboxError` and include LLM-friendly messages with gu
 | `SandboxError` | Base class for all sandbox errors |
 | `PathNotInSandboxError` | Path is outside sandbox boundaries |
 | `PathNotWritableError` | Attempting to write to a read-only path |
-| `SandboxPermissionEscalationError` | Child sandbox derivation would expand permissions |
 | `SuffixNotAllowedError` | File extension not in allowed list |
 | `FileTooLargeError` | File exceeds size limit |
 | `EditError` | Edit failed (text not found or not unique) |

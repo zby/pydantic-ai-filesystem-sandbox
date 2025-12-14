@@ -551,6 +551,26 @@ class TestSandboxDelete:
         with pytest.raises(FileNotFoundError, match="not found"):
             sandbox.delete("/output/nonexistent.txt")
 
+    def test_delete_rejects_disallowed_suffix(self, tmp_path):
+        """FileSystemToolset.delete() raises for disallowed suffix."""
+        sandbox_root = tmp_path / "output"
+        sandbox_root.mkdir()
+        test_file = sandbox_root / "test.bin"
+        test_file.write_text("content", encoding="utf-8")
+
+        config = SandboxConfig(
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                suffixes=[".txt"],
+            )]
+        )
+        sandbox = FileSystemToolset(Sandbox(config))
+
+        with pytest.raises(SuffixNotAllowedError, match="suffix '.bin' not allowed"):
+            sandbox.delete("/output/test.bin")
+
 
 class TestSandboxMove:
     """Tests for FileSystemToolset.move() functionality."""

@@ -259,7 +259,10 @@ class FileSystemToolset(AbstractToolset[Any]):
             offset: Character position to start reading from (must be >= 0, default: 0)
 
         Returns:
-            ReadResult with content, truncation info, and metadata
+            ReadResult with content, truncation info, and metadata.
+            If offset exceeds file length, returns empty content with chars_read=0
+            and truncated=False (consistent with Python slicing semantics).
+            Callers can detect this via: result.offset >= result.total_chars
 
         Raises:
             PathNotInSandboxError: If path outside sandbox
@@ -475,16 +478,19 @@ class FileSystemToolset(AbstractToolset[Any]):
         Raises:
             PathNotInSandboxError: If path outside sandbox
             PathNotWritableError: If path is read-only
+            SuffixNotAllowedError: If suffix not allowed
             FileNotFoundError: If file doesn't exist
             IsADirectoryError: If path is a directory
         """
-        _, resolved, _ = self._sandbox.get_path_config(path, op="write")
+        _, resolved, mount = self._sandbox.get_path_config(path, op="write")
 
         if not resolved.exists():
             raise FileNotFoundError(f"File not found: {path}")
 
         if not resolved.is_file():
             raise IsADirectoryError(f"Cannot delete directory with delete_file: {path}")
+
+        self._sandbox.check_suffix(resolved, mount, virtual_path=path)
 
         resolved.unlink()
 
@@ -534,8 +540,8 @@ class FileSystemToolset(AbstractToolset[Any]):
         # Create parent directories if needed
         dst_resolved.parent.mkdir(parents=True, exist_ok=True)
 
-        # Move the file
-        src_resolved.rename(dst_resolved)
+        # Move the file (shutil.move handles cross-filesystem moves)
+        shutil.move(str(src_resolved), str(dst_resolved))
 
         return f"Moved {source} to {destination}"
 

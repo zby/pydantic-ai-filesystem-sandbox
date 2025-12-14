@@ -103,11 +103,6 @@ class SandboxConfig(BaseModel):
             raise ValueError("SandboxConfig requires at least one mount")
         return self
 
-    def get_mounts(self) -> list[Mount]:
-        """Get the configured mounts."""
-        return self.mounts
-
-
 # ---------------------------------------------------------------------------
 # LLM-Friendly Errors
 # ---------------------------------------------------------------------------
@@ -262,7 +257,7 @@ class Sandbox:
 
     def _setup_mounts(self) -> None:
         """Resolve and validate configured mounts."""
-        mounts = self.config.get_mounts()
+        mounts = self.config.mounts
 
         # Check for duplicate mount points (nested mounts are allowed)
         mount_points = [m.mount_point for m in mounts]
@@ -319,7 +314,15 @@ class Sandbox:
     _AccessOp = Literal["read", "write"]
 
     def _normalize_path(self, path: str) -> str:
-        """Normalize a virtual path."""
+        """Normalize a virtual path for security validation.
+
+        Note: This method and _normalize_virtual_path_for_display share similar
+        logic but serve different purposes. This method is used in the security
+        pipeline and intentionally does NOT use posixpath.normpath() because '..'
+        traversal is handled later by _resolve_within() which uses Path.resolve()
+        and validates containment. The display method uses normpath() to produce
+        clean paths for error messages only.
+        """
         normalized = path.replace("\\", "/").strip()
         if not normalized:
             return "/"
@@ -343,7 +346,9 @@ class Sandbox:
         """Normalize a virtual path for display in error messages.
 
         This is used for suggested paths (e.g. "use the parent directory") and is
-        intentionally independent of mount matching behavior.
+        intentionally independent of mount matching behavior. Unlike _normalize_path,
+        this uses posixpath.normpath() to produce clean canonical paths and skips
+        security validation since the output is for display only.
         """
         normalized = path.replace("\\", "/").strip()
         if not normalized:
@@ -581,11 +586,6 @@ class Sandbox:
             readonly: If True, child cannot write anywhere
             inherit: If True and no allowlists given, inherit parent permissions
         """
-        if readonly is False and not self._has_any_writable_area():
-            raise SandboxPermissionEscalationError(
-                "Cannot create child sandbox with readonly=False: parent sandbox is readonly."
-            )
-
         read_entries = self._normalize_allowlist(allow_read)
         write_entries = self._normalize_allowlist(allow_write)
 
@@ -664,11 +664,6 @@ class Sandbox:
 
         label = normalized.rstrip("/") or "/"
         return mount_point, resolved, label
-
-    def _has_any_writable_area(self) -> bool:
-        if self._parent is not None:
-            return self._parent._has_any_writable_area()
-        return any(mount.mode == "rw" for _, _, mount in self._mounts)
 
     def _matches_prefix(
         self, mount_point: str, path: Path, prefix: tuple[str, Path, str]
@@ -751,9 +746,3 @@ class Sandbox:
             size = path.stat().st_size
             if size > mount.max_file_bytes:
                 raise FileTooLargeError(virtual_path, size, mount.max_file_bytes)
-
-
-class SandboxPermissionEscalationError(SandboxError):
-    """Raised when a child sandbox derivation would expand permissions."""
-
-    pass

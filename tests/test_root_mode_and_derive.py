@@ -8,9 +8,9 @@ import pytest
 from pydantic_ai_filesystem_sandbox import (
     Mount,
     PathNotInSandboxError,
+    PathNotWritableError,
     Sandbox,
     SandboxConfig,
-    SandboxPermissionEscalationError,
 )
 
 
@@ -131,15 +131,61 @@ class TestDeriveAllowlistsMultiPath:
         assert child.readable_roots == parent.readable_roots
         assert child.writable_roots == parent.writable_roots
 
-    def test_readonly_false_escalation_blocked(self, tmp_path: Path) -> None:
+    def test_readonly_false_on_ro_mount_inherits_no_write(self, tmp_path: Path) -> None:
+        """readonly=False on a ro-only sandbox inherits read-only access (no error)."""
         data_root = tmp_path / "data"
         data_root.mkdir()
 
         cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="ro")])
         parent = Sandbox(cfg)
 
-        with pytest.raises(SandboxPermissionEscalationError):
-            parent.derive(inherit=True, readonly=False)
+        # readonly=False doesn't grant write access - it just doesn't force read-only
+        # Since parent has no writable mounts, child inherits no write access
+        child = parent.derive(inherit=True, readonly=False)
+        assert child.can_read("/data/file.txt")
+        assert not child.can_write("/data/file.txt")
+        assert child.writable_roots == []
+
+    def test_readonly_false_on_rw_mount_allowed(self, tmp_path: Path) -> None:
+        """readonly=False on a sandbox with rw mounts should work."""
+        data_root = tmp_path / "data"
+        data_root.mkdir()
+
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="rw")])
+        parent = Sandbox(cfg)
+
+        # Should not raise - parent has writable mount
+        child = parent.derive(inherit=True, readonly=False)
+        assert child.can_write("/data/file.txt")
+
+    def test_derive_allow_write_on_ro_mount_blocked(self, tmp_path: Path) -> None:
+        """Trying to allow_write on a ro mount should fail during derive."""
+        data_root = tmp_path / "data"
+        data_root.mkdir()
+
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="ro")])
+        parent = Sandbox(cfg)
+
+        # This should fail because /data is read-only
+        with pytest.raises(PathNotWritableError):
+            parent.derive(allow_write="/data")
+
+    def test_nested_derive_cannot_regain_write_access(self, tmp_path: Path) -> None:
+        """A derived sandbox with no write access cannot grant write to children."""
+        data_root = tmp_path / "data"
+        data_root.mkdir()
+
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="rw")])
+        parent = Sandbox(cfg)
+
+        # Child has read-only access (no allow_write)
+        child = parent.derive(allow_read="/data")
+        assert child.can_read("/data/file.txt")
+        assert not child.can_write("/data/file.txt")
+
+        # Grandchild cannot regain write access
+        with pytest.raises(PathNotWritableError):
+            child.derive(allow_write="/data")
 
 
 class TestDeriveAllowlistsRootMount:
