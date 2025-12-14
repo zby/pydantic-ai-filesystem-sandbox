@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import posixpath
 import re
-import warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -84,156 +83,23 @@ class Mount(BaseModel):
         return self
 
 
-# ---------------------------------------------------------------------------
-# Deprecated Configuration (for backwards compatibility)
-# ---------------------------------------------------------------------------
-
-
-class PathConfig(BaseModel):
-    """Configuration for a single path in the sandbox.
-
-    DEPRECATED: Use Mount instead. Will be removed in a future version.
-    """
-
-    root: str = Field(description="Root directory path")
-    mode: Literal["ro", "rw"] = Field(
-        default="ro", description="Access mode: 'ro' (read-only) or 'rw' (read-write)"
-    )
-    suffixes: Optional[list[str]] = Field(
-        default=None,
-        description="Allowed file suffixes (e.g., ['.md', '.txt']). None means all allowed.",
-    )
-    max_file_bytes: Optional[int] = Field(
-        default=None, description="Maximum file size in bytes. None means no limit."
-    )
-    write_approval: bool = Field(
-        default=True,
-        description="Whether writes to this path require approval",
-    )
-    read_approval: bool = Field(
-        default=False,
-        description="Whether reads from this path require approval",
-    )
-
-
-class RootSandboxConfig(BaseModel):
-    """Configuration for a single-root sandbox.
-
-    DEPRECATED: Use Mount with mount_point="/" instead. Will be removed in a future version.
-    """
-
-    root: Path = Field(description="Root directory path for virtual '/'")
-    readonly: bool = Field(
-        default=False, description="If true, no writes anywhere in the sandbox"
-    )
-    suffixes: Optional[list[str]] = Field(
-        default=None,
-        description="Allowed file suffixes (e.g., ['.md', '.txt']). None means all allowed.",
-    )
-    max_file_bytes: Optional[int] = Field(
-        default=None, description="Maximum file size in bytes. None means no limit."
-    )
-
-
 class SandboxConfig(BaseModel):
     """Configuration for a sandbox.
 
-    Preferred usage (new API):
+    Example:
         config = SandboxConfig(mounts=[
             Mount(host_path="./docs", mount_point="/docs", mode="ro"),
             Mount(host_path="./data", mount_point="/data", mode="rw"),
         ])
-
-    Deprecated usage (old API, still supported):
-        # Multi-path mode
-        config = SandboxConfig(paths={
-            "docs": PathConfig(root="./docs", mode="ro"),
-        })
-        # Root mode
-        config = SandboxConfig(root=RootSandboxConfig(root="./project"))
     """
 
-    mounts: Optional[list[Mount]] = Field(
-        default=None,
-        description="List of directory mounts (preferred API)",
+    mounts: list[Mount] = Field(
+        description="List of directory mounts",
     )
-    # Deprecated fields
-    root: Optional[RootSandboxConfig] = Field(
-        default=None,
-        description="DEPRECATED: Use mounts with mount_point='/' instead",
-    )
-    paths: Optional[dict[str, PathConfig]] = Field(
-        default=None,
-        description="DEPRECATED: Use mounts instead",
-    )
-
-    @model_validator(mode="after")
-    def _validate_config(self) -> "SandboxConfig":
-        has_mounts = self.mounts is not None
-        has_root = self.root is not None
-        has_paths = self.paths is not None
-
-        # Must have exactly one configuration style
-        if not has_mounts and not has_root and not has_paths:
-            raise ValueError(
-                "SandboxConfig requires 'mounts' (or deprecated 'root'/'paths')."
-            )
-        if has_mounts and (has_root or has_paths):
-            raise ValueError(
-                "SandboxConfig cannot mix 'mounts' with deprecated 'root'/'paths'."
-            )
-        if has_root and has_paths:
-            raise ValueError("SandboxConfig cannot set both 'root' and 'paths'.")
-
-        # Emit deprecation warnings
-        if has_root:
-            warnings.warn(
-                "SandboxConfig(root=...) is deprecated. Use mounts=[Mount(mount_point='/')] instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        if has_paths:
-            warnings.warn(
-                "SandboxConfig(paths=...) is deprecated. Use mounts=[Mount(...)] instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        return self
 
     def get_mounts(self) -> list[Mount]:
-        """Get mounts, converting from deprecated config if needed."""
-        if self.mounts is not None:
-            return self.mounts
-
-        # Convert deprecated root config
-        if self.root is not None:
-            return [
-                Mount(
-                    host_path=self.root.root,
-                    mount_point="/",
-                    mode="ro" if self.root.readonly else "rw",
-                    suffixes=self.root.suffixes,
-                    max_file_bytes=self.root.max_file_bytes,
-                )
-            ]
-
-        # Convert deprecated paths config
-        if self.paths is not None:
-            return [
-                Mount(
-                    host_path=Path(cfg.root),
-                    mount_point=f"/{name}",
-                    mode=cfg.mode,
-                    suffixes=cfg.suffixes,
-                    max_file_bytes=cfg.max_file_bytes,
-                    write_approval=cfg.write_approval,
-                    read_approval=cfg.read_approval,
-                )
-                for name, cfg in self.paths.items()
-            ]
-
-        return []
+        """Get the configured mounts."""
+        return self.mounts
 
 
 # ---------------------------------------------------------------------------

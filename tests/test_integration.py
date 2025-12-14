@@ -18,7 +18,7 @@ from pydantic_ai_blocking_approval import (
 from pydantic_ai_filesystem_sandbox import (
     ApprovableFileSystemToolset,
     FileSystemToolset,
-    PathConfig,
+    Mount,
     Sandbox,
     SandboxConfig,
 )
@@ -33,12 +33,11 @@ class TestFileSandboxStandalone:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+            )]
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
@@ -56,9 +55,7 @@ class TestFileSandboxStandalone:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(root=str(sandbox_root), mode="rw")
-            }
+            mounts=[Mount(host_path=sandbox_root, mount_point="/data", mode="rw")]
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
@@ -77,12 +74,11 @@ class TestFileSandboxStandalone:
         (sandbox_root / "a.txt").write_text("a")
 
         config = SandboxConfig(
-            paths={
-                "files": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/files",
+                mode="ro",
+            )]
         )
         sandbox = FileSystemToolset(Sandbox(config))
 
@@ -121,13 +117,12 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -143,7 +138,7 @@ class TestApprovalToolsetIntegration:
             asyncio.run(
                 approved_sandbox.call_tool(
                     "write_file",
-                    {"path": "output/test.txt", "content": "test content"},
+                    {"path": "/output/test.txt", "content": "test content"},
                     ctx,
                     tool,
                 )
@@ -165,13 +160,12 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -185,7 +179,7 @@ class TestApprovalToolsetIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "write_file",
-                {"path": "output/test.txt", "content": "test content"},
+                {"path": "/output/test.txt", "content": "test content"},
                 ctx,
                 tool,
             )
@@ -209,13 +203,12 @@ class TestApprovalToolsetIntegration:
         (sandbox_root / "secret.txt").write_text("secret data")
 
         config = SandboxConfig(
-            paths={
-                "sensitive": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/sensitive",
+                mode="ro",
+                read_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -230,7 +223,7 @@ class TestApprovalToolsetIntegration:
             asyncio.run(
                 approved_sandbox.call_tool(
                     "read_file",
-                    {"path": "sensitive/secret.txt"},
+                    {"path": "/sensitive/secret.txt"},
                     ctx,
                     tool,
                 )
@@ -253,13 +246,12 @@ class TestApprovalToolsetIntegration:
         (sandbox_root / "secret.txt").write_text("secret data")
 
         config = SandboxConfig(
-            paths={
-                "sensitive": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/sensitive",
+                mode="ro",
+                read_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -273,7 +265,7 @@ class TestApprovalToolsetIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "read_file",
-                {"path": "sensitive/secret.txt"},
+                {"path": "/sensitive/secret.txt"},
                 ctx,
                 tool,
             )
@@ -295,13 +287,12 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=False,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=False,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -315,7 +306,7 @@ class TestApprovalToolsetIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "write_file",
-                {"path": "output/test.txt", "content": "test"},
+                {"path": "/output/test.txt", "content": "test"},
                 ctx,
                 tool,
             )
@@ -327,7 +318,7 @@ class TestApprovalToolsetIntegration:
     def test_approval_toolset_directly_with_approvable_toolset(self, tmp_path):
         """Test using ApprovalToolset directly with ApprovableFileSystemToolset.
 
-        This is the recommended approach: configure approval via PathConfig,
+        This is the recommended approach: configure approval via Mount,
         then wrap with ApprovalToolset.
         """
         approval_requests: list[ApprovalRequest] = []
@@ -340,13 +331,12 @@ class TestApprovalToolsetIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
@@ -362,7 +352,7 @@ class TestApprovalToolsetIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "write_file",
-                {"path": "output/test.txt", "content": "test"},
+                {"path": "/output/test.txt", "content": "test"},
                 ctx,
                 tool,
             )
@@ -386,13 +376,12 @@ class TestApprovalToolsetIntegration:
         (sandbox_root / "file.txt").write_text("content")
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+                read_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -431,13 +420,12 @@ class TestApprovalToolsetIntegration:
         (sandbox_root / "file.txt").write_text("content")
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=False,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+                read_approval=False,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -472,13 +460,12 @@ class TestApprovalControllerIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -493,7 +480,7 @@ class TestApprovalControllerIntegration:
         result = asyncio.run(
             approved_sandbox.call_tool(
                 "write_file",
-                {"path": "output/test.txt", "content": "approved content"},
+                {"path": "/output/test.txt", "content": "approved content"},
                 ctx,
                 tool,
             )
@@ -510,13 +497,12 @@ class TestApprovalControllerIntegration:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -532,7 +518,7 @@ class TestApprovalControllerIntegration:
             asyncio.run(
                 approved_sandbox.call_tool(
                     "write_file",
-                    {"path": "output/test.txt", "content": "should fail"},
+                    {"path": "/output/test.txt", "content": "should fail"},
                     ctx,
                     tool,
                 )
@@ -550,19 +536,18 @@ class TestFileSandboxPathValidation:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "safe": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/safe",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         # Directly test - paths outside sandbox should return blocked result
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("write_file", {"path": "unknown/file.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "/unknown/file.txt"}, ctx)
 
         assert result.is_blocked
         assert "not in any mount" in result.block_reason
@@ -573,19 +558,18 @@ class TestFileSandboxPathValidation:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "readonly": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",  # Read-only
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/readonly",
+                mode="ro",  # Read-only
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         # Writes to readonly should return blocked result
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("write_file", {"path": "readonly/file.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "/readonly/file.txt"}, ctx)
 
         assert result.is_blocked
         assert "read-only" in result.block_reason
@@ -600,18 +584,17 @@ class TestNeedsApprovalProtocol:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=False,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=False,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "/output/test.txt"}, ctx)
         assert result.is_pre_approved
 
     def test_needs_approval_returns_needs_approval_when_enabled(self, tmp_path):
@@ -620,18 +603,17 @@ class TestNeedsApprovalProtocol:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("write_file", {"path": "output/test.txt"}, ctx)
+        result = sandbox.needs_approval("write_file", {"path": "/output/test.txt"}, ctx)
         assert result.is_needs_approval
 
     def test_needs_approval_list_files_when_enabled(self, tmp_path):
@@ -640,18 +622,17 @@ class TestNeedsApprovalProtocol:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=True,  # Even with read_approval
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+                read_approval=True,  # Even with read_approval
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
+        result = sandbox.needs_approval("list_files", {"path": "/data"}, ctx)
         assert result.is_needs_approval
 
     def test_needs_approval_list_files_when_disabled(self, tmp_path):
@@ -660,18 +641,17 @@ class TestNeedsApprovalProtocol:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=False,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+                read_approval=False,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
-        result = sandbox.needs_approval("list_files", {"path": "data"}, ctx)
+        result = sandbox.needs_approval("list_files", {"path": "/data"}, ctx)
         assert result.is_pre_approved
 
     def test_needs_approval_list_files_allows_missing_path(self, tmp_path):
@@ -680,13 +660,12 @@ class TestNeedsApprovalProtocol:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(
-                    root=str(sandbox_root),
-                    mode="ro",
-                    read_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/data",
+                mode="ro",
+                read_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
@@ -704,15 +683,13 @@ class TestGetApprovalDescription:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(root=str(sandbox_root), mode="rw", write_approval=True)
-            }
+            mounts=[Mount(host_path=sandbox_root, mount_point="/output", mode="rw", write_approval=True)]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
         desc = sandbox.get_approval_description(
-            "write_file", {"path": "output/test.txt", "content": "data"}, ctx
+            "write_file", {"path": "/output/test.txt", "content": "data"}, ctx
         )
 
         assert "Write" in desc
@@ -725,15 +702,13 @@ class TestGetApprovalDescription:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "data": PathConfig(root=str(sandbox_root), mode="ro", read_approval=True)
-            }
+            mounts=[Mount(host_path=sandbox_root, mount_point="/data", mode="ro", read_approval=True)]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
         desc = sandbox.get_approval_description(
-            "read_file", {"path": "data/test.txt"}, ctx
+            "read_file", {"path": "/data/test.txt"}, ctx
         )
 
         assert "Read from" in desc
@@ -745,15 +720,13 @@ class TestGetApprovalDescription:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(root=str(sandbox_root), mode="rw", write_approval=True)
-            }
+            mounts=[Mount(host_path=sandbox_root, mount_point="/output", mode="rw", write_approval=True)]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
 
         ctx = MagicMock(spec=RunContext)
         desc = sandbox.get_approval_description(
-            "edit_file", {"path": "output/test.txt", "old_text": "old", "new_text": "new"}, ctx
+            "edit_file", {"path": "/output/test.txt", "old_text": "old", "new_text": "new"}, ctx
         )
 
         assert "Edit" in desc
@@ -772,13 +745,12 @@ class TestGetApprovalDescription:
         sandbox_root.mkdir()
 
         config = SandboxConfig(
-            paths={
-                "output": PathConfig(
-                    root=str(sandbox_root),
-                    mode="rw",
-                    write_approval=True,
-                )
-            }
+            mounts=[Mount(
+                host_path=sandbox_root,
+                mount_point="/output",
+                mode="rw",
+                write_approval=True,
+            )]
         )
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
@@ -792,7 +764,7 @@ class TestGetApprovalDescription:
         asyncio.run(
             approved_sandbox.call_tool(
                 "write_file",
-                {"path": "output/test.txt", "content": "test"},
+                {"path": "/output/test.txt", "content": "test"},
                 ctx,
                 tool,
             )
@@ -802,4 +774,4 @@ class TestGetApprovalDescription:
         assert len(approval_requests) == 1
         assert "Write" in approval_requests[0].description
         assert "4 chars" in approval_requests[0].description
-        assert approval_requests[0].tool_args["path"] == "output/test.txt"
+        assert approval_requests[0].tool_args["path"] == "/output/test.txt"

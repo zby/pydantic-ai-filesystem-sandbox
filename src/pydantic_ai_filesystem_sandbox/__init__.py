@@ -47,12 +47,9 @@ Usage (with approval):
 """
 
 from .sandbox import (
-    # Configuration (new API)
+    # Configuration
     Mount,
     SandboxConfig,
-    # Configuration (deprecated, for backwards compatibility)
-    PathConfig,
-    RootSandboxConfig,
     # Sandbox
     Sandbox,
     # Errors
@@ -81,12 +78,9 @@ from .approval_toolset import (
 __version__ = "0.9.0"
 
 __all__ = [
-    # Configuration (new API)
+    # Configuration
     "Mount",
     "SandboxConfig",
-    # Configuration (deprecated)
-    "PathConfig",
-    "RootSandboxConfig",
     # Sandbox (security boundary)
     "Sandbox",
     # Toolset (file I/O)

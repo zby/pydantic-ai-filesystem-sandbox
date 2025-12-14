@@ -6,7 +6,6 @@
 - [ApprovableFileSystemToolset](#approvablefilesystemtoolset): [needs_approval](#needs_approval), [get_approval_description](#get_approval_description)
 - [ReadResult](#readresult)
 - [Errors](#errors)
-- [Migration](#migration): [Deprecated APIs](#deprecated-apis)
 
 ---
 
@@ -399,54 +398,3 @@ All errors inherit from `SandboxError` and include LLM-friendly messages with gu
 | `FileTooLargeError` | File exceeds size limit |
 | `EditError` | Edit failed (text not found or not unique) |
 
----
-
-## Migration
-
-### From 0.8.x to 0.9.0
-
-Version 0.9.0 introduces Docker-style mounts, replacing the previous `PathConfig` and `RootSandboxConfig` APIs.
-
-**Old API (0.8.x):**
-```python
-# Multi-path mode
-config = SandboxConfig(paths={
-    "docs": PathConfig(root="./docs", mode="ro"),
-    "output": PathConfig(root="./output", mode="rw"),
-})
-
-# Root mode
-config = SandboxConfig(root=RootSandboxConfig(root="./project", readonly=False))
-```
-
-**New API (0.9.0):**
-```python
-# Equivalent to multi-path mode
-config = SandboxConfig(mounts=[
-    Mount(host_path="./docs", mount_point="/docs", mode="ro"),
-    Mount(host_path="./output", mount_point="/output", mode="rw"),
-])
-
-# Equivalent to root mode
-config = SandboxConfig(mounts=[
-    Mount(host_path="./project", mount_point="/", mode="rw"),
-])
-```
-
-**Path format changes:**
-- Old: `"docs/file.txt"` or `"/file.txt"` (depending on mode)
-- New: `"/docs/file.txt"` or `"/file.txt"` (unified format)
-- Note: paths without leading `/` are automatically normalized (e.g., `"docs/file.txt"` becomes `"/docs/file.txt"`)
-
-### Deprecated APIs
-
-The following are deprecated and will be removed in a future version:
-
-| Deprecated | Replacement |
-|------------|-------------|
-| `PathConfig` | `Mount` |
-| `RootSandboxConfig` | `Mount(mount_point="/")` |
-| `SandboxConfig(paths=...)` | `SandboxConfig(mounts=[...])` |
-| `SandboxConfig(root=...)` | `SandboxConfig(mounts=[Mount(mount_point="/")])` |
-
-The deprecated APIs still work via an internal conversion layer that emits `DeprecationWarning`.

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [0.9.1] - Unreleased
 
+### Removed
+- **Breaking**: `PathConfig` and `RootSandboxConfig` classes have been removed
+- **Breaking**: `SandboxConfig(paths=...)` and `SandboxConfig(root=...)` no longer accepted
+- Only `SandboxConfig(mounts=[...])` is supported now
+
 ### Fixed
 - Binary file handling: `read_file` now raises a clear error for non-UTF-8 files
 - Validation: reject negative `offset` and `max_chars` parameters in `read_file`
@@ -58,7 +63,7 @@ config = SandboxConfig(mounts=[
 ])
 ```
 
-Note: The deprecated APIs still work via an internal conversion layer that emits `DeprecationWarning`.
+Note: The deprecated APIs were removed in version 0.9.1.
 
 ## [0.8.0] - 2025-01-14
 

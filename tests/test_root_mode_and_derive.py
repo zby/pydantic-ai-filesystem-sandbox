@@ -6,9 +6,8 @@ from pathlib import Path
 import pytest
 
 from pydantic_ai_filesystem_sandbox import (
-    PathConfig,
+    Mount,
     PathNotInSandboxError,
-    RootSandboxConfig,
     Sandbox,
     SandboxConfig,
     SandboxPermissionEscalationError,
@@ -22,7 +21,7 @@ class TestRootModeSandbox:
         file_path = root / "src" / "a.txt"
         file_path.write_text("hi", encoding="utf-8")
 
-        cfg = SandboxConfig(root=RootSandboxConfig(root=root, readonly=False))
+        cfg = SandboxConfig(mounts=[Mount(host_path=root, mount_point="/", mode="rw")])
         sb = Sandbox(cfg, base_path=tmp_path)
 
         assert sb.resolve("src/a.txt") == file_path.resolve()
@@ -42,7 +41,7 @@ class TestRootModeSandbox:
         (outside / "secret.txt").write_text("nope", encoding="utf-8")
         (root / "inside.txt").write_text("ok", encoding="utf-8")
 
-        cfg = SandboxConfig(root=RootSandboxConfig(root=root, readonly=False))
+        cfg = SandboxConfig(mounts=[Mount(host_path=root, mount_point="/", mode="rw")])
         sb = Sandbox(cfg, base_path=tmp_path)
 
         with pytest.raises(PathNotInSandboxError):
@@ -66,10 +65,10 @@ class TestDeriveAllowlistsMultiPath:
         output_root.mkdir()
 
         cfg = SandboxConfig(
-            paths={
-                "data": PathConfig(root=str(data_root), mode="ro"),
-                "output": PathConfig(root=str(output_root), mode="rw"),
-            }
+            mounts=[
+                Mount(host_path=data_root, mount_point="/data", mode="ro"),
+                Mount(host_path=output_root, mount_point="/output", mode="rw"),
+            ]
         )
         parent = Sandbox(cfg)
         child = parent.derive()
@@ -87,7 +86,7 @@ class TestDeriveAllowlistsMultiPath:
         (data_root / "sub" / "a.txt").write_text("a", encoding="utf-8")
         (data_root / "b.txt").write_text("b", encoding="utf-8")
 
-        cfg = SandboxConfig(paths={"data": PathConfig(root=str(data_root), mode="ro")})
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="ro")])
         parent = Sandbox(cfg)
         child = parent.derive(allow_read="/data/sub")
 
@@ -103,7 +102,7 @@ class TestDeriveAllowlistsMultiPath:
         output_root = tmp_path / "output"
         output_root.mkdir()
 
-        cfg = SandboxConfig(paths={"output": PathConfig(root=str(output_root), mode="rw")})
+        cfg = SandboxConfig(mounts=[Mount(host_path=output_root, mount_point="/output", mode="rw")])
         parent = Sandbox(cfg)
         child = parent.derive(allow_write="/output")
 
@@ -119,10 +118,10 @@ class TestDeriveAllowlistsMultiPath:
         output_root.mkdir()
 
         cfg = SandboxConfig(
-            paths={
-                "data": PathConfig(root=str(data_root), mode="ro"),
-                "output": PathConfig(root=str(output_root), mode="rw"),
-            }
+            mounts=[
+                Mount(host_path=data_root, mount_point="/data", mode="ro"),
+                Mount(host_path=output_root, mount_point="/output", mode="rw"),
+            ]
         )
         parent = Sandbox(cfg)
         child = parent.derive(inherit=True)
@@ -136,7 +135,7 @@ class TestDeriveAllowlistsMultiPath:
         data_root = tmp_path / "data"
         data_root.mkdir()
 
-        cfg = SandboxConfig(paths={"data": PathConfig(root=str(data_root), mode="ro")})
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="ro")])
         parent = Sandbox(cfg)
 
         with pytest.raises(SandboxPermissionEscalationError):
@@ -151,7 +150,7 @@ class TestDeriveAllowlistsRootMode:
         (root / "src" / "a.py").write_text("a", encoding="utf-8")
         (root / "docs" / "b.md").write_text("b", encoding="utf-8")
 
-        cfg = SandboxConfig(root=RootSandboxConfig(root=root, readonly=False))
+        cfg = SandboxConfig(mounts=[Mount(host_path=root, mount_point="/", mode="rw")])
         parent = Sandbox(cfg)
         child = parent.derive(allow_read="/src")
 
@@ -172,7 +171,7 @@ class TestNestedDerivation:
         (data_root / "sub" / "deep" / "b.txt").write_text("b", encoding="utf-8")
         (data_root / "other.txt").write_text("other", encoding="utf-8")
 
-        cfg = SandboxConfig(paths={"data": PathConfig(root=str(data_root), mode="rw")})
+        cfg = SandboxConfig(mounts=[Mount(host_path=data_root, mount_point="/data", mode="rw")])
         parent = Sandbox(cfg)
 
         # First derivation: allow /data/sub
@@ -196,7 +195,7 @@ class TestNestedDerivation:
         (root / "docs").mkdir()
         (root / "docs" / "readme.md").write_text("readme", encoding="utf-8")
 
-        cfg = SandboxConfig(root=RootSandboxConfig(root=root, readonly=False))
+        cfg = SandboxConfig(mounts=[Mount(host_path=root, mount_point="/", mode="rw")])
         parent = Sandbox(cfg)
 
         # First derivation: allow /src
@@ -217,7 +216,7 @@ class TestNestedDerivation:
         (output_root / "dir1").mkdir(parents=True)
         (output_root / "dir2").mkdir()
 
-        cfg = SandboxConfig(paths={"output": PathConfig(root=str(output_root), mode="rw")})
+        cfg = SandboxConfig(mounts=[Mount(host_path=output_root, mount_point="/output", mode="rw")])
         parent = Sandbox(cfg)
 
         child = parent.derive(allow_write="/output/dir1")
