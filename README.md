@@ -13,24 +13,9 @@ When building LLM agents that interact with the filesystem, you need:
 
 ## Architecture
 
-This package separates concerns into two layers:
-
-- **Sandbox** - Security boundary for permission checking and path resolution
-- **FileSystemToolset** - File I/O tools that use Sandbox
-
-```
-┌────────────────────────────────────────────────────────────┐
-│                                                            │
-│   ApprovalToolset (optional, for human-in-the-loop)        │
-│                                                            │
-│   FileSystemToolset                                        │
-│   └── file I/O tools (read, write, edit, delete, etc.)     │
-│                                                            │
-│   Sandbox                                                  │
-│   └── policy: permissions, boundaries, path resolution     │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
-```
+- [**Sandbox**](docs/api.md#sandbox) - Security boundary for permission checking and path resolution
+- [**FileSystemToolset**](docs/api.md#filesystemtoolset) - File I/O tools that use Sandbox
+- **ApprovalToolset** - Optional wrapper for human-in-the-loop approval
 
 ## Installation
 
@@ -80,6 +65,8 @@ agent = Agent("openai:gpt-4", toolsets=[toolset])
 
 ## Configuration
 
+See [API Reference](docs/api.md#configuration) for complete details.
+
 ### PathConfig Options
 
 | Option | Type | Default | Description |
@@ -116,7 +103,7 @@ config = SandboxConfig(paths={
 })
 ```
 
-### RootSandboxConfig (single root)
+### [RootSandboxConfig](docs/api.md#rootsandboxconfig) (single root)
 
 You can configure a sandbox as a single virtual `/` rooted at a host directory:
 
@@ -131,7 +118,7 @@ sandbox.resolve("/src/main.py")  # -> <cwd>/src/main.py
 
 ### Deriving child sandboxes
 
-Use `Sandbox.derive()` to create a restricted child sandbox. By default the child has **no access** unless you explicitly allow paths.
+Use [`Sandbox.derive()`](docs/api.md#derive) to create a restricted child sandbox. By default the child has **no access** unless you explicitly allow paths.
 
 ```python
 parent = Sandbox(config)
@@ -148,7 +135,7 @@ writer = parent.derive(allow_write="output/reports")
 
 ## Available Tools
 
-The toolset provides seven tools to the agent:
+The [toolset](docs/api.md#filesystemtoolset) provides seven tools to the agent:
 
 ### read_file
 
@@ -229,7 +216,7 @@ Parameters:
 
 ## LLM-Friendly Errors
 
-All errors include guidance on what IS allowed:
+All [errors](docs/api.md#errors) include guidance on what IS allowed:
 
 ```python
 # PathNotInSandboxError
@@ -285,7 +272,7 @@ agent = Agent(..., toolsets=[approved_toolset])
 
 ## Using the Sandbox Directly
 
-The `Sandbox` class can be used independently for permission checking:
+The [`Sandbox`](docs/api.md#sandbox) class can be used independently for permission checking:
 
 ```python
 sandbox = Sandbox(config)
@@ -303,7 +290,7 @@ print(sandbox.writable_roots)  # ["output"]
 sandbox.needs_write_approval("output/file.txt")  # True/False
 ```
 
-## ReadResult
+## [ReadResult](docs/api.md#readresult)
 
 The `read_file` tool returns a `ReadResult` object:
 
@@ -328,31 +315,7 @@ if result.truncated:
 
 ## API Reference
 
-### Configuration
-
-- `SandboxConfig` - Top-level configuration (requires exactly one of `root` or `paths`)
-- `RootSandboxConfig` - Single-root sandbox configuration (virtual `/`)
-- `PathConfig` - Configuration for a named sandbox path
-
-### Classes
-
-- `Sandbox` - Security boundary for permission checking and path resolution
-- `FileSystemToolset` - PydanticAI AbstractToolset with file I/O tools
-- `ApprovableFileSystemToolset` - FileSystemToolset with approval protocol support
-
-### Errors
-
-- `SandboxError` - Base class for all sandbox errors
-- `PathNotInSandboxError` - Path outside sandbox boundaries
-- `PathNotWritableError` - Write to read-only path
-- `SandboxPermissionEscalationError` - Child sandbox attempted to expand permissions
-- `SuffixNotAllowedError` - File extension not allowed
-- `FileTooLargeError` - File exceeds size limit
-- `EditError` - Edit operation failed (text not found or not unique)
-
-### Types
-
-- `ReadResult` - Result of read operations with metadata
+See [docs/api.md](docs/api.md) for full API documentation.
 
 ## License
 
