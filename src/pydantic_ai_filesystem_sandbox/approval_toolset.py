@@ -31,7 +31,11 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic_ai.tools import RunContext
-from pydantic_ai_blocking_approval import ApprovalResult
+from pydantic_ai_blocking_approval import (
+    ApprovalConfig,
+    ApprovalResult,
+    needs_approval_from_config,
+)
 
 from .sandbox import PathNotInSandboxError, PathNotWritableError
 from .toolset import FileSystemToolset
@@ -56,7 +60,11 @@ class ApprovableFileSystemToolset(FileSystemToolset):
     """
 
     def needs_approval(
-        self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any]
+        self,
+        name: str,
+        tool_args: dict[str, Any],
+        ctx: RunContext[Any],
+        config: ApprovalConfig | None = None,
     ) -> ApprovalResult:
         """Check if the tool call requires approval.
 
@@ -66,10 +74,16 @@ class ApprovableFileSystemToolset(FileSystemToolset):
             name: Tool name being called
             tool_args: Arguments passed to the tool
             ctx: PydanticAI run context (includes deps, model, usage, etc.)
+            config: Optional per-tool config from ApprovalToolset
 
         Returns:
             ApprovalResult with status: blocked, pre_approved, or needs_approval
         """
+        # Check config-based policy first
+        base = needs_approval_from_config(name, config)
+        if base.is_pre_approved:
+            return base
+
         # Tools that require 'path' argument
         path_required_tools = {"write_file", "read_file", "edit_file", "delete_file"}
         if name in path_required_tools and "path" not in tool_args:

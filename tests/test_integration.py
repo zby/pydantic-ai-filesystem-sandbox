@@ -8,12 +8,22 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import RunContext
 
 from pydantic_ai_blocking_approval import (
-    ApprovalController,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
     ApprovalToolset,
 )
+
+
+# Callback functions for approval modes (replaced ApprovalController)
+def approve_all_callback(_: ApprovalRequest) -> ApprovalDecision:
+    """Auto-approve everything (for tests)."""
+    return ApprovalDecision(approved=True)
+
+
+def strict_callback(_: ApprovalRequest) -> ApprovalDecision:
+    """Auto-deny everything (strict safety mode)."""
+    return ApprovalDecision(approved=False, note="Strict mode")
 
 from pydantic_ai_filesystem_sandbox import (
     ApprovableFileSystemToolset,
@@ -449,13 +459,11 @@ class TestApprovalToolsetIntegration:
         assert "/data/file.txt" in result
 
 
-class TestApprovalControllerIntegration:
-    """Integration tests using ApprovalController modes."""
+class TestApprovalCallbackIntegration:
+    """Integration tests using approval callback functions."""
 
     def test_approve_all_mode(self, tmp_path):
-        """Test that approve_all mode auto-approves without prompting."""
-        controller = ApprovalController(mode="approve_all")
-
+        """Test that approve_all callback auto-approves without prompting."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -470,8 +478,7 @@ class TestApprovalControllerIntegration:
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            approval_callback=controller.approval_callback,
-            memory=controller.memory,
+            approval_callback=approve_all_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
@@ -490,9 +497,7 @@ class TestApprovalControllerIntegration:
         assert (sandbox_root / "test.txt").read_text() == "approved content"
 
     def test_strict_mode(self, tmp_path):
-        """Test that strict mode auto-denies all requests with PermissionError."""
-        controller = ApprovalController(mode="strict")
-
+        """Test that strict callback auto-denies all requests with PermissionError."""
         sandbox_root = tmp_path / "output"
         sandbox_root.mkdir()
 
@@ -507,8 +512,7 @@ class TestApprovalControllerIntegration:
         sandbox = ApprovableFileSystemToolset(Sandbox(config))
         approved_sandbox = ApprovalToolset(
             inner=sandbox,
-            approval_callback=controller.approval_callback,
-            memory=controller.memory,
+            approval_callback=strict_callback,
         )
 
         ctx = MagicMock(spec=RunContext)
